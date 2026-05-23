@@ -1,0 +1,318 @@
+-- ════════════════════════════════════════════════════════
+--  Football Bot — VoidUI
+-- ════════════════════════════════════════════════════════
+-- https://www.roblox.com/fr/games/16447934574/Soccer-Touch-Football
+local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
+VoidUI:SetScriptName("Soccer-Touch-Football -OBF")
+VoidUI:ShowCredit(function()
+print("V1")
+
+
+local RunService    = game:GetService("RunService")
+local Players       = game:GetService("Players")
+local player        = Players.LocalPlayer
+local char          = player.Character or player.CharacterAdded:Wait()
+local hrp           = char:WaitForChild("HumanoidRootPart")
+local humanoid      = char:WaitForChild("Humanoid")
+
+-- ── Targets ──
+local goalA = workspace.FootballField.Pitch.GoalA
+local goalB = workspace.FootballField.Pitch.GoalB
+
+-- Ball : dynamic reference, updates if ball respawns after a goal
+local ball = workspace.FootballField:FindFirstChild("SoccerBall", true)
+
+local function GetBall()
+    if ball and ball.Parent then return ball end
+    ball = workspace.FootballField:FindFirstChild("SoccerBall", true)
+    return ball
+end
+
+workspace.FootballField.DescendantAdded:Connect(function(inst)
+    if inst.Name == "SoccerBall" then
+        ball = inst
+    end
+end)
+
+local selectedGoal = nil
+
+local function GoalCenter()
+    if not selectedGoal then return nil end
+    local cf, _ = selectedGoal:GetBoundingBox()
+    return cf.Position
+end
+
+-- ── Highlights ──
+local function MakeHighlight(adornee)
+    local h = Instance.new("SelectionBox")
+    h.LineThickness       = 0.06
+    h.SurfaceTransparency = 0.85
+    h.Adornee             = adornee
+    h.Parent              = workspace
+    return h
+end
+
+local hlA = MakeHighlight(goalA)
+local hlB = MakeHighlight(goalB)
+
+local SEL_COLOR  = Color3.fromRGB(130, 80, 255)
+local IDLE_COLOR = Color3.fromRGB(60, 60, 80)
+
+local function UpdateHighlights()
+    if selectedGoal == goalA then
+        hlA.Color3 = SEL_COLOR  hlA.SurfaceColor3 = SEL_COLOR  hlA.SurfaceTransparency = 0.55
+        hlB.Color3 = IDLE_COLOR hlB.SurfaceColor3 = IDLE_COLOR hlB.SurfaceTransparency = 0.88
+    elseif selectedGoal == goalB then
+        hlB.Color3 = SEL_COLOR  hlB.SurfaceColor3 = SEL_COLOR  hlB.SurfaceTransparency = 0.55
+        hlA.Color3 = IDLE_COLOR hlA.SurfaceColor3 = IDLE_COLOR hlA.SurfaceTransparency = 0.88
+    else
+        hlA.Color3 = IDLE_COLOR hlA.SurfaceColor3 = IDLE_COLOR hlA.SurfaceTransparency = 0.88
+        hlB.Color3 = IDLE_COLOR hlB.SurfaceColor3 = IDLE_COLOR hlB.SurfaceTransparency = 0.88
+    end
+end
+
+UpdateHighlights()
+
+-- ── Settings ──
+local SNAP_RADIUS   = 8
+local snapActive    = false
+local aimBallActive = false
+local aimGoalActive = false
+
+-- ── Connections ──
+local snapConn    = nil
+local aimBallConn = nil
+local aimGoalConn = nil
+
+-- ════════════════════════════════════════════════════════
+--  UTILITIES
+-- ════════════════════════════════════════════════════════
+
+-- Places the ball at the player's feet, at the player's Y (works mid-air too)
+local function BallToFeet()
+    local b = GetBall()
+    if not b or not char or not char.Parent then return end
+    local forward = hrp.CFrame.LookVector
+    local feetPos = hrp.Position + forward * 2
+    b.CFrame = CFrame.new(feetPos.X, hrp.Position.Y, feetPos.Z)
+
+    -- Face the selected goal when snapping
+    if selectedGoal then
+        local goalPos = GoalCenter()
+        local pos     = hrp.Position
+        hrp.CFrame    = CFrame.lookAt(pos, Vector3.new(goalPos.X, pos.Y, goalPos.Z))
+    end
+end
+
+-- Teleports the player behind the ball, aligned with the selected goal
+local function TpToBall()
+    local b = GetBall()
+    if not b or not char or not char.Parent then return end
+    local ballPos = b.Position
+    local behind
+
+    if selectedGoal then
+        local goalPos = GoalCenter()
+        local toGoal  = (goalPos - ballPos).Unit
+        behind = ballPos - toGoal * 6
+    else
+        local toPlayer = Vector3.new(hrp.Position.X - ballPos.X, 0, hrp.Position.Z - ballPos.Z).Unit
+        behind = ballPos + toPlayer * 6
+    end
+
+    hrp.CFrame = CFrame.lookAt(
+        Vector3.new(behind.X, ballPos.Y, behind.Z),
+        Vector3.new(ballPos.X, ballPos.Y, ballPos.Z)
+    )
+end
+
+-- ════════════════════════════════════════════════════════
+--  BALL SNAP (continuous)
+-- ════════════════════════════════════════════════════════
+local function StartSnap()
+    if snapConn then return end
+    snapConn = RunService.Heartbeat:Connect(function()
+        if not snapActive or not char or not char.Parent then return end
+        local b = GetBall()
+        if not b then return end
+        local dist = (hrp.Position - Vector3.new(b.Position.X, hrp.Position.Y, b.Position.Z)).Magnitude
+        if dist <= SNAP_RADIUS then
+            BallToFeet()
+        end
+    end)
+end
+
+local function StopSnap()
+    if snapConn then snapConn:Disconnect() snapConn = nil end
+end
+
+-- ════════════════════════════════════════════════════════
+--  AUTO AIM BALL
+-- ════════════════════════════════════════════════════════
+local function StartAimBall()
+    if aimBallConn then return end
+    aimBallConn = RunService.Heartbeat:Connect(function()
+        if not aimBallActive or not char or not char.Parent then return end
+        local b = GetBall()
+        if not b then return end
+        local ballPos = b.Position
+        local pos     = hrp.Position
+        hrp.CFrame    = CFrame.lookAt(pos, Vector3.new(ballPos.X, pos.Y, ballPos.Z))
+    end)
+end
+
+local function StopAimBall()
+    if aimBallConn then aimBallConn:Disconnect() aimBallConn = nil end
+end
+
+-- ════════════════════════════════════════════════════════
+--  AUTO AIM GOAL
+-- ════════════════════════════════════════════════════════
+local function StartAimGoal()
+    if aimGoalConn then return end
+    aimGoalConn = RunService.Heartbeat:Connect(function()
+        if not aimGoalActive or not char or not char.Parent then return end
+        if not selectedGoal then return end
+        local goalPos = GoalCenter()
+        local pos     = hrp.Position
+        hrp.CFrame    = CFrame.lookAt(pos, Vector3.new(goalPos.X, pos.Y, goalPos.Z))
+    end)
+end
+
+local function StopAimGoal()
+    if aimGoalConn then aimGoalConn:Disconnect() aimGoalConn = nil end
+end
+
+-- ── Player respawn ──
+player.CharacterAdded:Connect(function(newChar)
+    char     = newChar
+    hrp      = newChar:WaitForChild("HumanoidRootPart")
+    humanoid = newChar:WaitForChild("Humanoid")
+end)
+
+-- ════════════════════════════════════════════════════════
+--  FLOATING BUTTONS
+-- ════════════════════════════════════════════════════════
+VoidUI:CreateFloatingButton({
+    Text     = "TP\nBall",
+    Position = UDim2.new(0, 20, 0.5, -70),
+    Size     = UDim2.new(0, 58, 0, 58),
+    Callback = function()
+        TpToBall()
+        VoidUI:Notify({ Title = "Teleport", Message = "Teleported behind the ball!", Type = "info", Duration = 2 })
+    end,
+})
+
+VoidUI:CreateFloatingButton({
+    Text     = "Ball\nFeet",
+    Position = UDim2.new(0, 20, 0.5, 0),
+    Size     = UDim2.new(0, 58, 0, 58),
+    Callback = function()
+        BallToFeet()
+        VoidUI:Notify({ Title = "Ball", Message = "Ball at your feet!", Type = "success", Duration = 2 })
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  MAIN UI
+-- ════════════════════════════════════════════════════════
+local Win = VoidUI:CreateWindow({
+    Title = "Football Bot",
+    Size  = UDim2.new(0, 420, 0, 500),
+})
+
+local Tab = Win:AddTab("Bot")
+
+-- ── Goal Selection ──
+Tab:AddLabel("Goal Selection")
+
+Tab:AddButton({
+    Label    = "⚽  Goal A",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        selectedGoal = selectedGoal == goalA and nil or goalA
+        UpdateHighlights()
+        VoidUI:Notify({
+            Title   = "Goal",
+            Message = selectedGoal == goalA and "Goal A selected" or "Selection cleared",
+            Type    = "info", Duration = 2,
+        })
+    end,
+})
+
+Tab:AddButton({
+    Label    = "⚽  Goal B",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        selectedGoal = selectedGoal == goalB and nil or goalB
+        UpdateHighlights()
+        VoidUI:Notify({
+            Title   = "Goal",
+            Message = selectedGoal == goalB and "Goal B selected" or "Selection cleared",
+            Type    = "info", Duration = 2,
+        })
+    end,
+})
+
+
+
+-- ── Ball Snap ──
+Tab:AddLabel("Ball Snap")
+
+Tab:AddLabel("⚠️ WARNING : Ball Snap locks the ball to your feet at all times. This is extremely powerful and very noticeable to other players. Use at your own risk.")
+
+Tab:AddSlider({
+    Label    = "Snap radius",
+    Min      = 2, Max = 20, Default = SNAP_RADIUS,
+    Suffix   = " st",
+    Callback = function(v) SNAP_RADIUS = v end,
+})
+
+Tab:AddToggle({
+    Label    = "Ball Snap",
+    Default  = false,
+    Callback = function(v)
+        snapActive = v
+        if v then
+            StartSnap()
+            VoidUI:Notify({ Title = "Ball Snap", Message = "Snap enabled!", Type = "success", Duration = 2 })
+        else
+            StopSnap()
+            VoidUI:Notify({ Title = "Ball Snap", Message = "Snap disabled.", Type = "info", Duration = 2 })
+        end
+    end,
+})
+
+-- ── Auto Aim ──
+Tab:AddLabel("Auto Aim")
+
+Tab:AddToggle({
+    Label    = "Auto aim ball",
+    Default  = false,
+    Callback = function(v)
+        aimBallActive = v
+        if v then
+            StartAimBall()
+            VoidUI:Notify({ Title = "Aim Ball", Message = "Enabled!", Type = "success", Duration = 2 })
+        else
+            StopAimBall()
+            VoidUI:Notify({ Title = "Aim Ball", Message = "Disabled.", Type = "info", Duration = 2 })
+        end
+    end,
+})
+
+Tab:AddToggle({
+    Label    = "Auto aim goal",
+    Default  = false,
+    Callback = function(v)
+        aimGoalActive = v
+        if v then
+            StartAimGoal()
+            VoidUI:Notify({ Title = "Aim Goal", Message = "Enabled!", Type = "success", Duration = 2 })
+        else
+            StopAimGoal()
+            VoidUI:Notify({ Title = "Aim Goal", Message = "Disabled.", Type = "info", Duration = 2 })
+        end
+    end,
+})
+end)

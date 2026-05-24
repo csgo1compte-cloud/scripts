@@ -108,7 +108,7 @@ local function getUnfertilizedDirt()
 end
 
 -- ── Seeds from game UI ──
-local seedScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.ScrollingFrame
+local seedScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PlantsFrame
 
 local rarityOrder = {
     "Common", "Uncommon", "Rare", "Epic", "Legendary",

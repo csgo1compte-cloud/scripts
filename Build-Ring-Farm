@@ -167,6 +167,33 @@ local function parseStock(stockLabel)
 end
 
 -- ════════════════════════════════════════════════════════
+--  EGGS DATA
+-- ════════════════════════════════════════════════════════
+
+-- Retourne les podiums dont le prompt correspond à un oeuf sélectionné
+-- (re-scanné à chaque cycle pour détecter si l'oeuf a déjà été acheté)
+local petMerchant = workspace:WaitForChild("PetMerchant", 10)
+
+local function scanEggs()
+    local found = {}  -- { { podiumIdx, name } }
+    if not petMerchant then return found end
+    for i = 1, 5 do
+        local podium = petMerchant:FindFirstChild("Podium" .. i .. "Lever")
+        if podium then
+            local attachment = podium:FindFirstChild("PromptAttachment")
+            local prompt = attachment and attachment:FindFirstChild("EggShopPrompt")
+            if prompt and prompt.ObjectText ~= "" and not prompt.ObjectText:find("Slot") then
+                table.insert(found, { podiumIdx = i, name = prompt.ObjectText })
+            end
+        end
+    end
+    return found
+end
+
+-- Scan initial pour construire l'UI
+local initialEggs = scanEggs()
+
+-- ════════════════════════════════════════════════════════
 --  UI
 -- ════════════════════════════════════════════════════════
 local Win = VoidUI:CreateWindow({
@@ -236,6 +263,108 @@ TabShop:AddButton({
     Callback = function()
         selectedGear = {}
         VoidUI:Notify({ Title = "Selection", Message = "Shop selection cleared.", Type = "warning", Duration = 2 })
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  TAB EGGS
+-- ════════════════════════════════════════════════════════
+local TabEggs = Win:AddTab("Eggs")
+
+-- selectedEggs = { ["Common Egg"] = true, ... } -- coche par l'utilisateur
+local selectedEggs = {}
+local buyingEggs   = false
+local stopEggs     = false
+
+-- Les 3 raretés sont toujours affichées
+local EGG_SLOTS = { "Common Egg", "Rare Egg", "Epic Egg" }
+
+TabEggs:AddLabel("Select eggs to buy")
+
+for _, eggName in ipairs(EGG_SLOTS) do
+    TabEggs:AddToggle({
+        Label   = eggName,
+        Default = false,
+        Callback = function(state)
+            selectedEggs[eggName] = state or nil
+        end,
+    })
+end
+
+TabEggs:AddLabel("Auto-Buy Eggs")
+
+TabEggs:AddToggle({
+    Label   = "Enable Auto-Buy Eggs",
+    Default = false,
+    Callback = function(state)
+        if state then
+            if buyingEggs then return end
+            buyingEggs = true; stopEggs = false
+            task.spawn(function()
+                while not stopEggs do
+                    -- Scan live : retourne les podiums avec leur nom d'oeuf
+                    local live = scanEggs()
+
+                    for _, egg in ipairs(live) do
+                        if stopEggs then break end
+                        -- Si la rareté scannée est cochée par l'utilisateur
+                        if selectedEggs[egg.name] then
+                            local podium = petMerchant:FindFirstChild("Podium" .. egg.podiumIdx .. "Lever")
+                            local prompt = podium
+                                and podium:FindFirstChild("PromptAttachment")
+                                and podium.PromptAttachment:FindFirstChild("EggShopPrompt")
+                            if prompt and not prompt.ObjectText:find("Slot") then
+                                fireproximityprompt(prompt)
+                                VoidUI:Notify({
+                                    Title   = "Egg bought!",
+                                    Message = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                                    Type    = "success",
+                                    Duration = 2,
+                                })
+                            end
+                            task.wait(0.3)
+                        end
+                    end
+
+                    -- Attente 2 minutes avant le prochain scan
+                    local elapsed = 0
+                    while elapsed < 120 and not stopEggs do
+                        task.wait(1)
+                        elapsed += 1
+                    end
+                end
+                buyingEggs = false
+            end)
+        else
+            stopEggs = true
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-buy eggs stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabEggs:AddButton({
+    Label  = "Roll Now",
+    Colors = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        local live = scanEggs()
+        for _, egg in ipairs(live) do
+            if selectedEggs[egg.name] then
+                local podium = petMerchant:FindFirstChild("Podium" .. egg.podiumIdx .. "Lever")
+                local prompt = podium
+                    and podium:FindFirstChild("PromptAttachment")
+                    and podium.PromptAttachment:FindFirstChild("EggShopPrompt")
+                if prompt and not prompt.ObjectText:find("Slot") then
+                    fireproximityprompt(prompt)
+                    VoidUI:Notify({
+                        Title   = "Egg bought!",
+                        Message = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                        Type    = "success",
+                        Duration = 2,
+                    })
+                end
+                task.wait(0.3)
+            end
+        end
     end,
 })
 
@@ -419,11 +548,9 @@ TabCtrl:AddToggle({
                             humanoid:UnequipTools()
                             task.wait(0.1)
                         else
-                            -- Toutes les plantes sont fertilisées, on attend
                             task.wait(5)
                         end
                     else
-                        -- Pas de stock, on attend
                         task.wait(5)
                     end
                 end
@@ -432,6 +559,81 @@ TabCtrl:AddToggle({
         else
             stopFertilizing = true
             VoidUI:Notify({ Title = "Stopped", Message = "Auto-fertilizer stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+-- ── Auto-Pet Treat ──
+local PET_TREAT_NAMES = {
+    "Normal Pet Treat",
+    "Strong Pet Treat",
+    "Super Pet Treat",
+}
+
+local function getPetTreatFromBackpack()
+    for _, tool in ipairs(player.Backpack:GetChildren()) do
+        for _, name in ipairs(PET_TREAT_NAMES) do
+            if string.find(tool.Name, name, 1, true) then
+                return tool
+            end
+        end
+    end
+    return nil
+end
+
+local function getMyPet()
+    for _, obj in ipairs(myPlot:GetDescendants()) do
+        if obj:IsA("Model") and obj:GetAttribute("PetKey") ~= nil then
+            if obj:GetAttribute("PetOwner") == player.Name then
+                return obj
+            end
+        end
+    end
+    return nil
+end
+
+TabCtrl:AddLabel("Auto-Pet Treat")
+local treatingPet     = false
+local stopTreatingPet = false
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Pet Treat",
+    Default = false,
+    Callback = function(state)
+        if state then
+            if treatingPet then return end
+            treatingPet = true; stopTreatingPet = false
+            task.spawn(function()
+                while not stopTreatingPet do
+                    local pet = getMyPet()
+                    if pet then
+                        local boosted = pet:GetAttribute("PetBoosted")
+                        if not boosted then
+                            local tool = getPetTreatFromBackpack()
+                            if tool then
+                                humanoid:EquipTool(tool)
+                                task.wait(0.5)
+                                ReplicatedStorage.Remotes.UsePetTreat:FireServer(pet)
+                                VoidUI:Notify({ Title = "Pet fed!", Message = pet.Name, Type = "success", Duration = 2 })
+                                task.wait(0.5)
+                                humanoid:UnequipTools()
+                                task.wait(0.1)
+                            else
+                                -- Pas de treat en stock, on attend
+                                task.wait(5)
+                            end
+                        else
+                            -- Pet déjà boosté, on attend 5s avant de revérifier
+                            task.wait(5)
+                        end
+                    else
+                        task.wait(5)
+                    end
+                end
+                treatingPet = false
+            end)
+        else
+            stopTreatingPet = true
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-pet treat stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
@@ -445,5 +647,9 @@ TabInfo:AddButton({ Label = myPlot.Name, Callback = function() end })
 TabInfo:AddLabel("Stands on startup")
 for name, idx in pairs(getWorldSeeds()) do
     TabInfo:AddLabel(name .. "  →  Stand " .. idx)
+end
+TabInfo:AddLabel("Eggs on startup")
+for _, egg in ipairs(initialEggs) do
+    TabInfo:AddLabel("Podium " .. egg.podiumIdx .. "  →  " .. egg.name)
 end
 end)

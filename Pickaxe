@@ -1,10 +1,11 @@
 -- Game : https://www.roblox.com/fr/games/73814003954154/Pickaxe-Tycoon
 -- Autocollect
--- AutoSell during best timing
+-- AutoSell
 -- Ajout : Autocollect money, AutoUpgrade Furnace, AutoBuy 100x
 local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
 VoidUI:SetScriptName("Pickaxe Tycoon ⛏️-OBF")
 VoidUI:ShowCredit(function()
+
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,6 +19,7 @@ for _, plot in ipairs(workspace.Plots:GetChildren()) do
         break
     end
 end
+print(myPlot)
 
 if not myPlot then
     VoidUI:Notify({ Title = "Erreur", Message = "Aucun plot trouvé !", Type = "error", Duration = 5 })
@@ -40,14 +42,12 @@ local function parseMoney(str)
 end
 
 -- Références
-local multText  = workspace.OreMultPart.BillboardGui.Frame.MultText
-local priceText = workspace.Plots:FindFirstChild(myPlot.Name).Sell.UpgradeButton.BillboardGui.Frame.PriceText
+local priceText       = workspace.Plots:FindFirstChild(myPlot.Name).Sell.UpgradeButton.BillboardGui.Frame.PriceText
 local buy100PriceText = workspace.Plots:FindFirstChild(myPlot.Name).Buttons.ButtonBuy100.BillboardGui.Frame.PriceText
-local cashText  = localPlayer.PlayerGui:WaitForChild("CurrencyGui").Frame.CashText
+local cashText        = localPlayer.PlayerGui:WaitForChild("CurrencyGui").Frame.CashText
 
 -- Config
-local minMult      = 1.4
-local upgradeWait  = 60
+local upgradeWait        = 60
 local sellActive         = false
 local collectActive      = false
 local upgradeActive      = false
@@ -62,9 +62,9 @@ local function autoSell()
     if not hrp then return end
 
     local button = workspace.Plots:FindFirstChild(myPlot.Name).Sell.DepositButton.Button
-    firetouchinterest(hrp, button, 0)
+    firetouchinterest(button, hrp, 0)
     task.wait(0.1)
-    firetouchinterest(hrp, button, 1)
+    firetouchinterest(button, hrp, 1)
 end
 
 local function autoCollect()
@@ -94,9 +94,9 @@ local function autoUpgrade()
 
     if cash >= price then
         local button = workspace.Plots:FindFirstChild(myPlot.Name).Sell.UpgradeButton.Button
-        firetouchinterest(hrp, button, 0)
+        firetouchinterest(button, hrp, 0)
         task.wait(0.1)
-        firetouchinterest(hrp, button, 1)
+        firetouchinterest(button, hrp, 1)
         VoidUI:Notify({ Title = "Auto Upgrade", Message = "Upgrade acheté !", Type = "success", Duration = 2 })
         return true
     end
@@ -110,9 +110,9 @@ local function autoCollectMoney()
     if not hrp then return end
 
     local button = workspace.Plots:FindFirstChild(myPlot.Name).Sell.CollectButton.Button
-    firetouchinterest(hrp, button, 0)
+    firetouchinterest(button, hrp, 0)
     task.wait(0.1)
-    firetouchinterest(hrp, button, 1)
+    firetouchinterest(button, hrp, 1)
 end
 
 local function autoBuy100()
@@ -126,33 +126,19 @@ local function autoBuy100()
 
     if cash >= price then
         local button = workspace.Plots:FindFirstChild(myPlot.Name).Buttons.ButtonBuy100.Button
-        firetouchinterest(hrp, button, 0)
+        firetouchinterest(button, hrp, 0)
         task.wait(0.1)
-        firetouchinterest(hrp, button, 1)
+        firetouchinterest(button, hrp, 1)
         return true
     end
     return false
 end
 
 -- ── UI ──
-local Win = VoidUI:CreateWindow({ Title = "Pickaxe Tycoon ⛏️", Size = UDim2.new(0, 400, 0, 500) })
+local Win = VoidUI:CreateWindow({ Title = "Pickaxe Tycoon ⛏️", Size = UDim2.new(0, 400, 0, 480) })
 local Tab = Win:AddTab("Main")
 
 Tab:AddLabel("Vente")
-
-Tab:AddTextInput({
-    Label       = "Min Mult",
-    Placeholder = "ex: 1.4",
-    Callback    = function(v)
-        local val = tonumber(v)
-        if val then
-            minMult = val
-            VoidUI:Notify({ Title = "Min Mult", Message = "Multiplicateur : " .. val .. "x", Type = "info", Duration = 2 })
-        else
-            VoidUI:Notify({ Title = "Erreur", Message = "Valeur invalide", Type = "error", Duration = 2 })
-        end
-    end,
-})
 
 Tab:AddToggle({
     Label   = "Auto Sell",
@@ -220,11 +206,8 @@ Tab:AddSlider({
 task.spawn(function()
     while task.wait(10) do
         if sellActive then
-            local mult = tonumber(multText.Text:match("[%d%.]+"))
-            if mult and mult >= minMult then
-                autoSell()
-                VoidUI:Notify({ Title = "Auto Sell", Message = "Vendu ! (x" .. mult .. ")", Type = "success", Duration = 2 })
-            end
+            autoSell()
+            VoidUI:Notify({ Title = "Auto Sell", Message = "Vendu !", Type = "success", Duration = 2 })
         end
     end
 end)
@@ -278,9 +261,9 @@ task.spawn(function()
         if not hrp then continue end
 
         local button = workspace.Plots:FindFirstChild(myPlot.Name).GroupReward.CollectButton.Button
-        firetouchinterest(hrp, button, 0)
+        firetouchinterest(button, hrp, 0)
         task.wait(0.1)
-        firetouchinterest(hrp, button, 1)
+        firetouchinterest(button, hrp, 1)
     end
 end)
 end)

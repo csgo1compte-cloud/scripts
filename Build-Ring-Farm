@@ -386,7 +386,7 @@ TabCtrl:AddToggle({
                 while not stopBuying do
                     if next(selectedSeeds) == nil then task.wait(1); continue end
                     ReplicatedStorage.Remotes.RollSeeds:FireServer()
-                    task.wait(3)
+                    task.wait(4)
                     for seedName, standIdx in pairs(getWorldSeeds()) do
                         if stopBuying then break end
                         if selectedSeeds[seedName] then
@@ -395,6 +395,7 @@ TabCtrl:AddToggle({
                             task.wait(0.5)
                         end
                     end
+                    task.wait(1)
                 end
                 buying = false
             end)

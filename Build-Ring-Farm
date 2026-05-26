@@ -3,7 +3,7 @@
 -- Enable Auto-Collect to sell your crates every 2 minutes.
 
 local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
-VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF")
+VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF-V5")
 VoidUI:ShowCredit(function()
 print("V4")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -77,14 +77,14 @@ end
 
 -- ── Fertilizer ──
 local FERTILIZER_NAMES = {
-    "Normal Fertilizer",
-    "Strong Fertilizer",
     "Super Fertilizer",
+    "Strong Fertilizer",
+    "Normal Fertilizer",
 }
 
 local function getFertilizerFromBackpack()
-    for _, tool in ipairs(player.Backpack:GetChildren()) do
-        for _, name in ipairs(FERTILIZER_NAMES) do
+    for _, name in ipairs(FERTILIZER_NAMES) do
+        for _, tool in ipairs(player.Backpack:GetChildren()) do
             if string.find(tool.Name, name, 1, true) then
                 return tool
             end
@@ -170,12 +170,10 @@ end
 --  EGGS DATA
 -- ════════════════════════════════════════════════════════
 
--- Retourne les podiums dont le prompt correspond à un oeuf sélectionné
--- (re-scanné à chaque cycle pour détecter si l'oeuf a déjà été acheté)
 local petMerchant = workspace:WaitForChild("PetMerchant", 10)
 
 local function scanEggs()
-    local found = {}  -- { { podiumIdx, name } }
+    local found = {}
     if not petMerchant then return found end
     for i = 1, 5 do
         local podium = petMerchant:FindFirstChild("Podium" .. i .. "Lever")
@@ -190,8 +188,159 @@ local function scanEggs()
     return found
 end
 
--- Scan initial pour construire l'UI
 local initialEggs = scanEggs()
+
+-- ════════════════════════════════════════════════════════
+--  PET OPTIMIZE HELPERS
+-- ════════════════════════════════════════════════════════
+
+local function getPetTeleportCFrame(floorIndex)
+    local sign
+    if floorIndex == 1 then
+        sign = myPlot:FindFirstChild("PlotUpgradeSign")
+    elseif floorIndex == 2 then
+        local sf = myPlot:FindFirstChild("SecondFloor")
+        sign = sf and sf:FindFirstChild("PlotUpgradeSign")
+    elseif floorIndex == 3 then
+        local tf = myPlot:FindFirstChild("ThirdFloor")
+        sign = tf and tf:FindFirstChild("PlotUpgradeSign")
+    end
+    return sign and sign:GetPivot()
+end
+
+local function getUnlockedFloors()
+    local floors = {}
+    if myPlot:FindFirstChild("FarmPlot") then table.insert(floors, 1) end
+    if myPlot:FindFirstChild("SecondFloor") then table.insert(floors, 2) end
+    if myPlot:FindFirstChild("ThirdFloor") then table.insert(floors, 3) end
+    return floors
+end
+
+local function getEquippedPets()
+    local pets = {}
+    for _, obj in ipairs(myPlot:GetChildren()) do
+        if obj:IsA("Model") and obj:GetAttribute("PetKey") ~= nil then
+            if obj:GetAttribute("PetOwner") == player.Name then
+                table.insert(pets, {
+                    name       = obj:GetAttribute("PetName"),
+                    petKey     = obj:GetAttribute("PetKey"),
+                    multiplier = obj:GetAttribute("EarningsMultiplier") or 1,
+                    floorIndex = obj:GetAttribute("FloorIndex") or 1,
+                })
+            end
+        end
+    end
+    return pets
+end
+
+local function getInventoryPets()
+    local pets = {}
+    for _, tool in ipairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool:GetAttribute("InventoryCategory") == "Pets" then
+            table.insert(pets, {
+                name       = tool:GetAttribute("trueName") or tool.Name,
+                petKey     = tool:GetAttribute("petKey"),
+                multiplier = tool:GetAttribute("EarningsMultiplier") or 1,
+                tool       = tool,
+            })
+        end
+    end
+    return pets
+end
+
+local function optimizePets()
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local unlockedFloors = getUnlockedFloors()
+
+    repeat
+        local equippedPets  = getEquippedPets()
+        local inventoryPets = getInventoryPets()
+
+        table.sort(equippedPets,  function(a, b) return a.multiplier > b.multiplier end)
+        table.sort(inventoryPets, function(a, b) return a.multiplier > b.multiplier end)
+
+        if #inventoryPets == 0 then break end
+
+        local nbSlots = #unlockedFloors
+        local allPets = {}
+        for _, p in ipairs(equippedPets) do
+            table.insert(allPets, { source = "equipped", data = p })
+        end
+        for _, p in ipairs(inventoryPets) do
+            table.insert(allPets, { source = "inventory", data = p })
+        end
+        table.sort(allPets, function(a, b) return a.data.multiplier > b.data.multiplier end)
+
+        local bestPets = {}
+        for i = 1, math.min(nbSlots, #allPets) do
+            table.insert(bestPets, allPets[i])
+        end
+
+        local bestKeys = {}
+        for _, entry in ipairs(bestPets) do
+            bestKeys[entry.data.petKey] = true
+        end
+
+        local toUnequip = {}
+        for _, p in ipairs(equippedPets) do
+            if not bestKeys[p.petKey] then
+                table.insert(toUnequip, p)
+            end
+        end
+
+        local toEquip = {}
+        for _, entry in ipairs(bestPets) do
+            if entry.source == "inventory" then
+                table.insert(toEquip, entry.data)
+            end
+        end
+
+        if #toUnequip == 0 and #toEquip == 0 then break end
+
+        for _, p in ipairs(toUnequip) do
+            ReplicatedStorage.Remotes.Pets.UnequipPet:FireServer(p.petKey)
+            task.wait(0.5)
+        end
+
+        for _, p in ipairs(toEquip) do
+            local occupied = {}
+            for _, eq in ipairs(getEquippedPets()) do
+                occupied[eq.floorIndex] = true
+            end
+
+            local targetFloor = nil
+            for _, floorIdx in ipairs(unlockedFloors) do
+                if not occupied[floorIdx] then
+                    targetFloor = floorIdx
+                    break
+                end
+            end
+
+            if not targetFloor then break end
+
+            local cf = getPetTeleportCFrame(targetFloor)
+            if cf then
+                hrp.CFrame = cf + Vector3.new(0, 3, 0)
+                task.wait(0.5)
+            end
+
+            local tool = player.Backpack:FindFirstChild(p.tool.Name)
+            if not tool then continue end
+
+            humanoid:EquipTool(tool)
+            task.wait(0.5)
+            ReplicatedStorage.Remotes.Pets.EquipPet:FireServer()
+            task.wait(0.3)
+            humanoid:UnequipTools()
+            task.wait(0.3)
+        end
+
+    until false
+
+    VoidUI:Notify({ Title = "Pets", Message = "Optimisation terminée.", Type = "success", Duration = 3 })
+end
 
 -- ════════════════════════════════════════════════════════
 --  UI
@@ -271,12 +420,10 @@ TabShop:AddButton({
 -- ════════════════════════════════════════════════════════
 local TabEggs = Win:AddTab("Eggs")
 
--- selectedEggs = { ["Common Egg"] = true, ... } -- coche par l'utilisateur
 local selectedEggs = {}
 local buyingEggs   = false
 local stopEggs     = false
 
--- Les 3 raretés sont toujours affichées
 local EGG_SLOTS = { "Common Egg", "Rare Egg", "Epic Egg" }
 
 TabEggs:AddLabel("Select eggs to buy")
@@ -302,12 +449,9 @@ TabEggs:AddToggle({
             buyingEggs = true; stopEggs = false
             task.spawn(function()
                 while not stopEggs do
-                    -- Scan live : retourne les podiums avec leur nom d'oeuf
                     local live = scanEggs()
-
                     for _, egg in ipairs(live) do
                         if stopEggs then break end
-                        -- Si la rareté scannée est cochée par l'utilisateur
                         if selectedEggs[egg.name] then
                             local podium = petMerchant:FindFirstChild("Podium" .. egg.podiumIdx .. "Lever")
                             local prompt = podium
@@ -325,8 +469,6 @@ TabEggs:AddToggle({
                             task.wait(0.3)
                         end
                     end
-
-                    -- Attente 2 minutes avant le prochain scan
                     local elapsed = 0
                     while elapsed < 120 and not stopEggs do
                         task.wait(1)
@@ -544,7 +686,6 @@ TabCtrl:AddToggle({
                             humanoid:EquipTool(tool)
                             task.wait(0.5)
                             ReplicatedStorage.Remotes.UseFertilizer:FireServer(dirt)
-                            print("Fertilizer placé sur : " .. dirt.Parent.Name .. " (" .. myPlot.Name .. ")")
                             task.wait(0.5)
                             humanoid:UnequipTools()
                             task.wait(0.1)
@@ -566,14 +707,14 @@ TabCtrl:AddToggle({
 
 -- ── Auto-Pet Treat ──
 local PET_TREAT_NAMES = {
-    "Normal Pet Treat",
-    "Strong Pet Treat",
     "Super Pet Treat",
+    "Strong Pet Treat",
+    "Normal Pet Treat",
 }
 
 local function getPetTreatFromBackpack()
-    for _, tool in ipairs(player.Backpack:GetChildren()) do
-        for _, name in ipairs(PET_TREAT_NAMES) do
+    for _, name in ipairs(PET_TREAT_NAMES) do
+        for _, tool in ipairs(player.Backpack:GetChildren()) do
             if string.find(tool.Name, name, 1, true) then
                 return tool
             end
@@ -582,15 +723,16 @@ local function getPetTreatFromBackpack()
     return nil
 end
 
-local function getMyPet()
+local function getMyPets()
+    local out = {}
     for _, obj in ipairs(myPlot:GetDescendants()) do
         if obj:IsA("Model") and obj:GetAttribute("PetKey") ~= nil then
             if obj:GetAttribute("PetOwner") == player.Name then
-                return obj
+                table.insert(out, obj)
             end
         end
     end
-    return nil
+    return out
 end
 
 TabCtrl:AddLabel("Auto-Pet Treat")
@@ -605,30 +747,31 @@ TabCtrl:AddToggle({
             treatingPet = true; stopTreatingPet = false
             task.spawn(function()
                 while not stopTreatingPet do
-                    local pet = getMyPet()
-                    if pet then
-                        local boosted = pet:GetAttribute("PetBoosted")
-                        if not boosted then
-                            local tool = getPetTreatFromBackpack()
-                            if tool then
-                                humanoid:EquipTool(tool)
-                                task.wait(0.5)
-                                ReplicatedStorage.Remotes.UsePetTreat:FireServer(pet)
-                                VoidUI:Notify({ Title = "Pet fed!", Message = pet.Name, Type = "success", Duration = 2 })
-                                task.wait(0.5)
-                                humanoid:UnequipTools()
-                                task.wait(0.1)
-                            else
-                                -- Pas de treat en stock, on attend
-                                task.wait(5)
+                    local pets = getMyPets()
+                    if #pets > 0 then
+                        for _, pet in ipairs(pets) do
+                            if stopTreatingPet then break end
+                            local boosted = pet:GetAttribute("PetBoosted")
+                            if not boosted then
+                                local tool = getPetTreatFromBackpack()
+                                if tool then
+                                    humanoid:EquipTool(tool)
+                                    task.wait(0.5)
+                                    ReplicatedStorage.Remotes.UsePetTreat:FireServer(pet)
+                                    VoidUI:Notify({ Title = "Pet fed!", Message = pet.Name, Type = "success", Duration = 2 })
+                                    task.wait(0.5)
+                                    humanoid:UnequipTools()
+                                    task.wait(0.1)
+                                else
+                                    task.wait(5)
+                                    break
+                                end
                             end
-                        else
-                            -- Pet déjà boosté, on attend 5s avant de revérifier
-                            task.wait(5)
                         end
                     else
                         task.wait(5)
                     end
+                    task.wait(1)
                 end
                 treatingPet = false
             end)
@@ -652,11 +795,8 @@ local function formatValue(n)
     else return tostring(n) end
 end
 
-
 -- ════════════════════════════════════════════════════════
 --  TAB SEEDS TO COMPOST
---  Même logique exacte que la tab Seeds (seedScrollFrame),
---  sans aucun filtre backpack.
 -- ════════════════════════════════════════════════════════
 
 local TabCompostSeeds = Win:AddTab("Seeds to Compost")
@@ -707,20 +847,6 @@ TabCompostSeeds:AddButton({
     end,
 })
 
--- ════════════════════════════════════════════════════════
---  HELPERS COMPOSTER
--- ════════════════════════════════════════════════════════
-
-local Composter = ReplicatedStorage.Remotes.Composter
-
-local function formatValue(n)
-    if n >= 1e12 then return string.format("%.2fT", n / 1e12)
-    elseif n >= 1e9 then return string.format("%.2fB", n / 1e9)
-    elseif n >= 1e6 then return string.format("%.2fM", n / 1e6)
-    else return tostring(n) end
-end
-
--- Parcourt le backpack et retourne les tools dont le nom de plante est sélectionné
 local function getSelectedSeedTools()
     local out = {}
     for _, tool in ipairs(player.Backpack:GetChildren()) do
@@ -896,8 +1022,6 @@ local selectedPets = {}
 
 local petScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PetsFrame
 
--- Grille plate, pas de dropdown rareté
--- On affiche quand même la rareté en nom si disponible
 local petItems = {}
 
 for _, child in ipairs(petScrollFrame:GetChildren()) do
@@ -906,14 +1030,12 @@ for _, child in ipairs(petScrollFrame:GetChildren()) do
         local sname  = child:FindFirstChild("SeedName")
         local rarity = child:FindFirstChild("RarityName")
         local name   = (sname and sname.Text ~= "???" and sname.Text) or child.Name
-        -- On ajoute la rareté entre parenthèses si dispo
         local rar    = rarity and rarity.Text or ""
         local displayName = (rar ~= "") and (name .. " (" .. rar .. ")") or name
         table.insert(petItems, { Name = name, Icon = icon and icon.Image or "", Display = displayName })
     end
 end
 
--- CardGrid simple (pas de FilteredCardGrid, pas de dropdown)
 TabSellPets:AddLabel("Select pets to sell")
 
 TabSellPets:AddCardGrid({
@@ -930,12 +1052,9 @@ TabSellPets:AddButton({
     end,
 })
 
--- ── Auto-Sell ──
-
 local sellingPets     = false
 local stopSellingPets = false
 
--- Retourne tous les tools du backpack qui sont des pets sélectionnés
 local function getSelectedPetTools()
     local out = {}
     for _, tool in ipairs(player.Backpack:GetChildren()) do
@@ -1006,6 +1125,51 @@ TabSellPets:AddButton({
             end
             VoidUI:Notify({ Title = "Sell Pets", Message = sold .. " pet(s) sold.", Type = "success", Duration = 3 })
         end)
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  TAB PETS (OPTIMIZE)
+-- ════════════════════════════════════════════════════════
+
+local TabPets = Win:AddTab("Pets")
+
+local optimizing     = false
+local stopOptimizing = false
+
+TabPets:AddLabel("Auto-Optimize Pets")
+
+TabPets:AddToggle({
+    Label    = "Enable Auto-Optimize",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if optimizing then return end
+            optimizing = true; stopOptimizing = false
+            task.spawn(function()
+                while not stopOptimizing do
+                    optimizePets()
+                    local elapsed = 0
+                    while elapsed < 30 and not stopOptimizing do
+                        task.wait(1)
+                        elapsed += 1
+                    end
+                end
+                optimizing = false
+            end)
+            VoidUI:Notify({ Title = "Pets", Message = "Auto-optimize started.", Type = "success", Duration = 3 })
+        else
+            stopOptimizing = true
+            VoidUI:Notify({ Title = "Pets", Message = "Auto-optimize stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabPets:AddButton({
+    Label    = "Optimize now",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        task.spawn(optimizePets)
     end,
 })
 

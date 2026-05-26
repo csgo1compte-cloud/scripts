@@ -5,7 +5,7 @@
 local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
 VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF")
 VoidUI:ShowCredit(function()
-print("V3")
+print("V4")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 
@@ -635,6 +635,376 @@ TabCtrl:AddToggle({
             stopTreatingPet = true
             VoidUI:Notify({ Title = "Stopped", Message = "Auto-pet treat stopped.", Type = "warning", Duration = 3 })
         end
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  HELPERS COMPOSTER
+-- ════════════════════════════════════════════════════════
+
+local Composter = ReplicatedStorage.Remotes.Composter
+
+local function formatValue(n)
+    if n >= 1e12 then return string.format("%.2fT", n / 1e12)
+    elseif n >= 1e9 then return string.format("%.2fB", n / 1e9)
+    elseif n >= 1e6 then return string.format("%.2fM", n / 1e6)
+    else return tostring(n) end
+end
+
+
+-- ════════════════════════════════════════════════════════
+--  TAB SEEDS TO COMPOST
+--  Même logique exacte que la tab Seeds (seedScrollFrame),
+--  sans aucun filtre backpack.
+-- ════════════════════════════════════════════════════════
+
+local TabCompostSeeds = Win:AddTab("Seeds to Compost")
+
+local selectedCompostSeeds = {}
+
+local compostSeedsByRarity = {}
+for _, r in ipairs(rarityOrder) do compostSeedsByRarity[r] = {} end
+
+for _, child in ipairs(seedScrollFrame:GetChildren()) do
+    if child:IsA("Frame") then
+        local icon   = child:FindFirstChild("Icon")
+        local rarity = child:FindFirstChild("RarityName")
+        local sname  = child:FindFirstChild("SeedName")
+        local name   = (sname and sname.Text ~= "???" and sname.Text) or child.Name
+        local rar    = (rarity and rarity.Text) or "Common"
+        local bucket = compostSeedsByRarity[rar] or compostSeedsByRarity["Common"]
+        table.insert(bucket, { Name = name, Icon = icon and icon.Image or "" })
+    end
+end
+
+local compostSeedGroups = {}
+for _, r in ipairs(rarityOrder) do
+    if #compostSeedsByRarity[r] > 0 then
+        table.insert(compostSeedGroups, { Label = r, Items = compostSeedsByRarity[r] })
+    end
+end
+
+local compostSeedGrid = TabCompostSeeds:AddFilteredCardGrid({
+    Groups   = compostSeedGroups,
+    Columns  = 4,
+    Callback = function(sel) selectedCompostSeeds = sel end,
+})
+
+TabCompostSeeds:AddButton({
+    Label    = "Select all (current rarity)",
+    Callback = function()
+        compostSeedGrid:SelectAll()
+        VoidUI:Notify({ Title = "Selection", Message = "All seeds in group selected.", Type = "info", Duration = 2 })
+    end,
+})
+
+TabCompostSeeds:AddButton({
+    Label    = "Deselect all",
+    Callback = function()
+        compostSeedGrid:DeselectAll()
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  HELPERS COMPOSTER
+-- ════════════════════════════════════════════════════════
+
+local Composter = ReplicatedStorage.Remotes.Composter
+
+local function formatValue(n)
+    if n >= 1e12 then return string.format("%.2fT", n / 1e12)
+    elseif n >= 1e9 then return string.format("%.2fB", n / 1e9)
+    elseif n >= 1e6 then return string.format("%.2fM", n / 1e6)
+    else return tostring(n) end
+end
+
+-- Parcourt le backpack et retourne les tools dont le nom de plante est sélectionné
+local function getSelectedSeedTools()
+    local out = {}
+    for _, tool in ipairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool:GetAttribute("InventoryCategory") == "Seeds" then
+            local plantName = tool:GetAttribute("Plant") or tool.Name
+            if selectedCompostSeeds[plantName] then
+                local level    = tostring(tool:GetAttribute("Level") or 1)
+                local mutation = tostring(tool:GetAttribute("Mutation") or "Normal")
+                table.insert(out, {
+                    plantName = plantName,
+                    level     = level,
+                    mutation  = mutation,
+                })
+            end
+        end
+    end
+    return out
+end
+
+-- ════════════════════════════════════════════════════════
+--  TAB COMPOSTER
+-- ════════════════════════════════════════════════════════
+
+local TabComposter = Win:AddTab("Composter")
+
+local composterFloor = 3
+local composting     = false
+local stopComposting = false
+
+TabComposter:AddLabel("Floor selection")
+
+TabComposter:AddDropdown({
+    Label    = "Composter floor",
+    Options  = { "Floor 3", "Floor 2" },
+    Callback = function(v)
+        composterFloor = (v == "Floor 2") and 2 or 3
+        VoidUI:Notify({ Title = "Composter", Message = "Now targeting " .. v, Type = "info", Duration = 2 })
+    end,
+})
+
+TabComposter:AddLabel("Uses seeds selected in 'Seeds to Compost' tab")
+
+local function runCompostLoop()
+    while not stopComposting do
+        local seedTools = getSelectedSeedTools()
+
+        if #seedTools == 0 then
+            task.wait(5)
+            continue
+        end
+
+        for _, entry in ipairs(seedTools) do
+            if stopComposting then break end
+
+            local seedKey = entry.plantName .. "_" .. entry.level .. "_" .. entry.mutation
+
+            local ok, err = pcall(function()
+                Composter.InsertSeed:InvokeServer(composterFloor, seedKey, 1)
+            end)
+
+            if not ok then
+                VoidUI:Notify({ Title = "Error", Message = "InsertSeed failed: " .. tostring(err), Type = "error", Duration = 3 })
+                task.wait(0.5)
+                continue
+            end
+
+            task.wait(0.2)
+
+            local state = nil
+            pcall(function()
+                state = Composter.RequestState:InvokeServer(composterFloor)
+            end)
+
+            if not state then task.wait(0.3); continue end
+
+            local shouldPull = false
+
+            if state.TooRich then
+                shouldPull = true
+                VoidUI:Notify({ Title = "Composter F" .. composterFloor, Message = "TooRich! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
+            elseif composterFloor == 3 and state.Value >= 25e12 then
+                shouldPull = true
+                VoidUI:Notify({ Title = "Composter F3", Message = "25T reached! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
+            end
+
+            if shouldPull then
+                pcall(function()
+                    Composter.PullLever:InvokeServer(composterFloor)
+                end)
+                task.wait(1)
+                break
+            end
+
+            task.wait(0.1)
+        end
+    end
+    composting = false
+end
+
+TabComposter:AddLabel("Auto-Compost")
+
+TabComposter:AddToggle({
+    Label    = "Enable Auto-Compost",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if composting then return end
+            composting = true; stopComposting = false
+            task.spawn(runCompostLoop)
+            VoidUI:Notify({ Title = "Composter", Message = "Auto-compost started on Floor " .. composterFloor, Type = "success", Duration = 3 })
+        else
+            stopComposting = true
+            VoidUI:Notify({ Title = "Composter", Message = "Auto-compost stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabComposter:AddButton({
+    Label    = "Insert once (all selected seeds)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        task.spawn(function()
+            local seedTools = getSelectedSeedTools()
+            if #seedTools == 0 then
+                VoidUI:Notify({ Title = "Composter", Message = "No seeds selected/found in backpack.", Type = "warning", Duration = 3 })
+                return
+            end
+            local inserted = 0
+            for _, entry in ipairs(seedTools) do
+                local seedKey = entry.plantName .. "_" .. entry.level .. "_" .. entry.mutation
+                pcall(function()
+                    Composter.InsertSeed:InvokeServer(composterFloor, seedKey, 1)
+                end)
+                inserted += 1
+                task.wait(0.15)
+            end
+            VoidUI:Notify({ Title = "Composter", Message = inserted .. " seed(s) inserted into Floor " .. composterFloor, Type = "success", Duration = 3 })
+        end)
+    end,
+})
+
+TabComposter:AddLabel("Check state")
+
+TabComposter:AddButton({
+    Label    = "Request State (current floor)",
+    Callback = function()
+        task.spawn(function()
+            local state = nil
+            pcall(function()
+                state = Composter.RequestState:InvokeServer(composterFloor)
+            end)
+            if state then
+                VoidUI:Notify({
+                    Title   = "Floor " .. composterFloor .. " State",
+                    Message = "Value: " .. formatValue(state.Value or 0) .. " | TooRich: " .. tostring(state.TooRich or false),
+                    Type    = "info",
+                    Duration = 5,
+                })
+            else
+                VoidUI:Notify({ Title = "Error", Message = "Could not get state.", Type = "error", Duration = 3 })
+            end
+        end)
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  TAB SELL PETS
+-- ════════════════════════════════════════════════════════
+
+local TabSellPets = Win:AddTab("Sell Pets")
+
+local selectedPets = {}
+
+local petScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PetsFrame
+
+-- Grille plate, pas de dropdown rareté
+-- On affiche quand même la rareté en nom si disponible
+local petItems = {}
+
+for _, child in ipairs(petScrollFrame:GetChildren()) do
+    if child:IsA("Frame") then
+        local icon   = child:FindFirstChild("Icon")
+        local sname  = child:FindFirstChild("SeedName")
+        local rarity = child:FindFirstChild("RarityName")
+        local name   = (sname and sname.Text ~= "???" and sname.Text) or child.Name
+        -- On ajoute la rareté entre parenthèses si dispo
+        local rar    = rarity and rarity.Text or ""
+        local displayName = (rar ~= "") and (name .. " (" .. rar .. ")") or name
+        table.insert(petItems, { Name = name, Icon = icon and icon.Image or "", Display = displayName })
+    end
+end
+
+-- CardGrid simple (pas de FilteredCardGrid, pas de dropdown)
+TabSellPets:AddLabel("Select pets to sell")
+
+TabSellPets:AddCardGrid({
+    Items    = petItems,
+    Columns  = 4,
+    Callback = function(sel) selectedPets = sel end,
+})
+
+TabSellPets:AddButton({
+    Label    = "Deselect all",
+    Callback = function()
+        selectedPets = {}
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
+    end,
+})
+
+-- ── Auto-Sell ──
+
+local sellingPets     = false
+local stopSellingPets = false
+
+-- Retourne tous les tools du backpack qui sont des pets sélectionnés
+local function getSelectedPetTools()
+    local out = {}
+    for _, tool in ipairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool:GetAttribute("InventoryCategory") == "Pets" then
+            local trueName = tool:GetAttribute("trueName") or tool.Name
+            local petKey   = tool:GetAttribute("petKey")
+            if selectedPets[trueName] and petKey then
+                table.insert(out, { trueName = trueName, petKey = petKey })
+            end
+        end
+    end
+    return out
+end
+
+TabSellPets:AddLabel("Auto-Sell")
+
+TabSellPets:AddToggle({
+    Label    = "Enable Auto-Sell Pets",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if sellingPets then return end
+            sellingPets = true; stopSellingPets = false
+            task.spawn(function()
+                while not stopSellingPets do
+                    local pets = getSelectedPetTools()
+                    for _, entry in ipairs(pets) do
+                        if stopSellingPets then break end
+                        local ok, err = pcall(function()
+                            ReplicatedStorage.Remotes.SellPet:InvokeServer(entry.petKey)
+                        end)
+                        if ok then
+                            VoidUI:Notify({ Title = "Pet sold!", Message = entry.trueName, Type = "success", Duration = 2 })
+                        else
+                            VoidUI:Notify({ Title = "Error", Message = "SellPet failed: " .. tostring(err), Type = "error", Duration = 3 })
+                        end
+                        task.wait(0.3)
+                    end
+                    task.wait(2)
+                end
+                sellingPets = false
+            end)
+            VoidUI:Notify({ Title = "Sell Pets", Message = "Auto-sell started.", Type = "success", Duration = 3 })
+        else
+            stopSellingPets = true
+            VoidUI:Notify({ Title = "Sell Pets", Message = "Auto-sell stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabSellPets:AddButton({
+    Label    = "Sell now (one shot)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        task.spawn(function()
+            local pets = getSelectedPetTools()
+            if #pets == 0 then
+                VoidUI:Notify({ Title = "Sell Pets", Message = "No matching pets in backpack.", Type = "warning", Duration = 3 })
+                return
+            end
+            local sold = 0
+            for _, entry in ipairs(pets) do
+                local ok = pcall(function()
+                    ReplicatedStorage.Remotes.SellPet:InvokeServer(entry.petKey)
+                end)
+                if ok then sold += 1 end
+                task.wait(0.3)
+            end
+            VoidUI:Notify({ Title = "Sell Pets", Message = sold .. " pet(s) sold.", Type = "success", Duration = 3 })
+        end)
     end,
 })
 

@@ -357,11 +357,12 @@ end
 --  UPGRADE PLANTS — HELPERS
 -- ════════════════════════════════════════════════════════
 
--- Sphères Neon violettes au-dessus des plantes sélectionnées
-local highlightParts = {}  -- cardName → { part, running }
+-- Sphères Neon violettes — indexées par pName (nom de plante)
+-- car la sélection est maintenant basée sur pName
+local highlightParts = {}  -- pName → { part, stop }
 
-local function addHighlight(cardName, plantModel)
-    if highlightParts[cardName] then return end
+local function addHighlight(pName, plantModel)
+    if highlightParts[pName] then return end
     local cf = plantModel:GetPivot()
     local sphere = Instance.new("Part")
     sphere.Name             = "VoidUI_Highlight"
@@ -391,38 +392,62 @@ local function addHighlight(cardName, plantModel)
             end
         end
     end)
-    highlightParts[cardName] = { part = sphere, stop = function() running = false end }
+    highlightParts[pName] = { part = sphere, stop = function() running = false end }
 end
 
-local function removeHighlight(cardName)
-    local entry = highlightParts[cardName]
+local function removeHighlight(pName)
+    local entry = highlightParts[pName]
     if entry then
         entry.stop()
         entry.part:Destroy()
-        highlightParts[cardName] = nil
+        highlightParts[pName] = nil
     end
 end
 
 local function clearAllHighlights()
-    for cardName in pairs(highlightParts) do
-        removeHighlight(cardName)
+    for pName in pairs(highlightParts) do
+        removeHighlight(pName)
     end
 end
 
--- Tables des plantes
-local plantCardItems  = {}
-local dirtByCardName  = {}
-local modelByCardName = {}
+-- Sélection basée sur pName (PlantName attribute)
+-- { [pName] = true }  — survit aux rescans
+local selectedPlantsForUpgrade = {}
+
+-- Tables des plantes (reconstruites à chaque scan)
+local plantCardItems  = {}   -- { Name = cardName, Icon = ... }
+local dirtByCardName  = {}   -- cardName → dirt
+local modelByCardName = {}   -- cardName → plantModel
+local pNameByCardName = {}   -- cardName → pName
 
 local function buildCardName(pName, lvl, counter)
     return "[Lv." .. lvl .. "] " .. pName .. " #" .. counter
 end
 
-local function scanPlants()
+-- TabUpgrade ref — définie plus bas, utilisée dans fullRescan
+local TabUpgrade = nil
+
+-- Rebuild complet des cards du tab (Tab:Clear() + recréation)
+local function fullRescan(keepSelection)
+    -- 1. Vide les tables internes
     for i = #plantCardItems, 1, -1 do plantCardItems[i] = nil end
     for k in pairs(dirtByCardName)  do dirtByCardName[k]  = nil end
     for k in pairs(modelByCardName) do modelByCardName[k] = nil end
+    for k in pairs(pNameByCardName) do pNameByCardName[k] = nil end
 
+    -- 2. Garde les pNames sélectionnés si demandé
+    local prevSelected = {}
+    if keepSelection then
+        for pName in pairs(selectedPlantsForUpgrade) do
+            prevSelected[pName] = true
+        end
+    end
+
+    -- 3. Vide les highlights (on les recréera après)
+    clearAllHighlights()
+    selectedPlantsForUpgrade = {}
+
+    -- 4. Scan du plot
     local counters = {}
     local raw      = {}
     for _, fp in ipairs(getFarmPlots()) do
@@ -436,84 +461,38 @@ local function scanPlants()
         end
     end
     table.sort(raw, function(a, b) return a.pName < b.pName end)
+
     for _, entry in ipairs(raw) do
         counters[entry.pName] = (counters[entry.pName] or 0) + 1
         local cardName = buildCardName(entry.pName, entry.lvl, counters[entry.pName])
         dirtByCardName[cardName]  = entry.dirt
         modelByCardName[cardName] = entry.model
+        pNameByCardName[cardName] = entry.pName
         table.insert(plantCardItems, { Name = cardName, Icon = iconByPlantName[entry.pName] or "" })
     end
-end
 
-scanPlants()
-
--- Sélection
-local selectedPlantsForUpgrade = {}
-
-local function selectCard(cardName)
-    if selectedPlantsForUpgrade[cardName] then return end
-    selectedPlantsForUpgrade[cardName] = true
-    local model = modelByCardName[cardName]
-    if model then addHighlight(cardName, model) end
-end
-
-local function deselectCard(cardName)
-    if not selectedPlantsForUpgrade[cardName] then return end
-    selectedPlantsForUpgrade[cardName] = nil
-    removeHighlight(cardName)
-end
-
--- Refresh des niveaux (migre la sélection et les highlights vers les nouveaux noms)
-local function refreshCardLevels()
-    local oldSelected = {}
-    for k in pairs(selectedPlantsForUpgrade) do oldSelected[k] = true end
-    clearAllHighlights()
-    selectedPlantsForUpgrade = {}
-
-    -- Relit les niveaux depuis les dirt refs
-    local byDirt = {}
-    for oldName, dirt in pairs(dirtByCardName) do
-        byDirt[dirt] = { oldName = oldName, model = modelByCardName[oldName] }
-    end
-
-    local raw = {}
-    for dirt, info in pairs(byDirt) do
-        local pName = dirt:GetAttribute("PlantName")
-        if pName then
-            table.insert(raw, {
-                pName   = pName,
-                lvl     = dirt:GetAttribute("PlantLevel") or 0,
-                dirt    = dirt,
-                model   = info.model,
-                oldName = info.oldName,
-            })
-        end
-    end
-    table.sort(raw, function(a, b) return a.pName < b.pName end)
-
-    local newDirt  = {}
-    local newModel = {}
-    local newItems = {}
-    local counters = {}
-
-    for _, entry in ipairs(raw) do
-        counters[entry.pName] = (counters[entry.pName] or 0) + 1
-        local newName = buildCardName(entry.pName, entry.lvl, counters[entry.pName])
-        newDirt[newName]  = entry.dirt
-        newModel[newName] = entry.model
-        table.insert(newItems, { Name = newName, Icon = iconByPlantName[entry.pName] or "" })
-        if oldSelected[entry.oldName] then
-            selectedPlantsForUpgrade[newName] = true
-            if entry.model then addHighlight(newName, entry.model) end
+    -- 5. Restaure la sélection par pName (les plantes disparues sont ignorées)
+    if keepSelection then
+        -- On garde une seule highlight par pName (première instance trouvée)
+        local seen = {}
+        for _, item in ipairs(plantCardItems) do
+            local pName = pNameByCardName[item.Name]
+            if pName and prevSelected[pName] then
+                selectedPlantsForUpgrade[pName] = true
+                if not seen[pName] then
+                    seen[pName] = true
+                    local model = modelByCardName[item.Name]
+                    if model then addHighlight(pName, model) end
+                end
+            end
         end
     end
 
-    for i = #plantCardItems, 1, -1 do plantCardItems[i] = nil end
-    for k in pairs(dirtByCardName)  do dirtByCardName[k]  = nil end
-    for k in pairs(modelByCardName) do modelByCardName[k] = nil end
-    for _, v in ipairs(newItems)    do table.insert(plantCardItems, v) end
-    for k, v in pairs(newDirt)      do dirtByCardName[k]  = v end
-    for k, v in pairs(newModel)     do modelByCardName[k] = v end
+    -- 6. Rebuild des cards dans le tab (Tab:Clear() + AddCardGrid)
+    if TabUpgrade then
+        TabUpgrade:Clear()
+        rebuildTabContent()
+    end
 end
 
 -- ════════════════════════════════════════════════════════
@@ -966,120 +945,164 @@ TabCtrl:AddToggle({
 -- ════════════════════════════════════════════════════════
 --  TAB UPGRADE PLANTS
 -- ════════════════════════════════════════════════════════
-local TabUpgrade = Win:AddTab("Upgrade Plants")
-
-TabUpgrade:AddLabel("Per-plant upgrade — select below")
+TabUpgrade = Win:AddTab("Upgrade Plants")
 
 local perPlantTargetLevel = 10
-TabUpgrade:AddTextInput({
-    Label       = "Target level",
-    Placeholder = "10",
-    Callback    = function(v)
-        local n = tonumber(v)
-        if n then perPlantTargetLevel = math.clamp(math.floor(n), 1, 75) end
-    end,
-})
-
 local upgrading        = false
 local stopUpgrading    = false
 local upgradeToggleRef = nil
 
-upgradeToggleRef = TabUpgrade:AddToggle({
-    Label    = "▶ Auto-Upgrade selected plants",
-    Default  = false,
-    Callback = function(state)
-        if state then
-            if upgrading then return end
-            if next(selectedPlantsForUpgrade) == nil then
-                VoidUI:Notify({ Title = "Upgrade", Message = "No plants selected.", Type = "warning", Duration = 3 })
-                if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
-                return
-            end
-            upgrading = true; stopUpgrading = false
-            task.spawn(function()
-                while not stopUpgrading do
-                    local allDone = true
-                    for cardName in pairs(selectedPlantsForUpgrade) do
-                        if stopUpgrading then break end
-                        local dirt = dirtByCardName[cardName]
-                        if not dirt then continue end
-                        local lvl = dirt:GetAttribute("PlantLevel") or 0
-                        if lvl >= perPlantTargetLevel then continue end
-                        allDone = false
-                        local ok, result = pcall(function()
-                            return ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
-                        end)
-                        if not ok or (type(result) == "boolean" and result == false) then
-                            VoidUI:Notify({ Title = "Upgrade", Message = "Refused — refreshing & waiting 60s", Type = "warning", Duration = 5 })
-                            scanPlants()
-                            local elapsed = 0
-                            while elapsed < 60 and not stopUpgrading do
-                                task.wait(1); elapsed += 1
+-- Fonction qui (re)construit tout le contenu du tab
+-- Appelée au démarrage et à chaque fullRescan
+function rebuildTabContent()
+    TabUpgrade:AddLabel("Per-plant upgrade — select below")
+
+    TabUpgrade:AddTextInput({
+        Label       = "Target level",
+        Placeholder = tostring(perPlantTargetLevel),
+        Callback    = function(v)
+            local n = tonumber(v)
+            if n then perPlantTargetLevel = math.clamp(math.floor(n), 1, 75) end
+        end,
+    })
+
+    upgradeToggleRef = TabUpgrade:AddToggle({
+        Label    = "▶ Auto-Upgrade selected plants",
+        Default  = false,
+        Callback = function(state)
+            if state then
+                if upgrading then return end
+                if next(selectedPlantsForUpgrade) == nil then
+                    VoidUI:Notify({ Title = "Upgrade", Message = "No plants selected.", Type = "warning", Duration = 3 })
+                    if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
+                    return
+                end
+                upgrading = true; stopUpgrading = false
+
+                task.spawn(function()
+                    while not stopUpgrading do
+                        local allDone = true
+
+                        -- Itère sur les pNames sélectionnés
+                        -- Collecte d'abord les dirt refs correspondants
+                        local dirtsToUpgrade = {}
+                        for _, item in ipairs(plantCardItems) do
+                            local pName = pNameByCardName[item.Name]
+                            if pName and selectedPlantsForUpgrade[pName] then
+                                local dirt = dirtByCardName[item.Name]
+                                if dirt then
+                                    table.insert(dirtsToUpgrade, { dirt = dirt, pName = pName })
+                                end
                             end
-                        else
-                            task.wait(0.1)
                         end
-                    end
-                    if not stopUpgrading then
-                        scanPlants()
-                        if allDone then
+
+                        for _, entry in ipairs(dirtsToUpgrade) do
+                            if stopUpgrading then break end
+                            local dirt = entry.dirt
+                            local lvl  = dirt:GetAttribute("PlantLevel") or 0
+                            if lvl >= perPlantTargetLevel then continue end
+                            allDone = false
+
+                            local ok, result = pcall(function()
+                                return ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
+                            end)
+
+                            if not ok or (type(result) == "boolean" and result == false) then
+                                VoidUI:Notify({ Title = "Upgrade", Message = "Refused — waiting 60s", Type = "warning", Duration = 5 })
+                                fullRescan(true)
+                                local elapsed = 0
+                                while elapsed < 60 and not stopUpgrading do
+                                    task.wait(1); elapsed += 1
+                                end
+                            else
+                                task.wait(0.1)
+                            end
+                        end
+
+                        if not stopUpgrading and allDone then
                             VoidUI:Notify({ Title = "Upgrade", Message = "All plants reached level " .. perPlantTargetLevel, Type = "success", Duration = 4 })
                             stopUpgrading = true
                             if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
                         end
                     end
+                    upgrading = false
+                end)
+
+                VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade started (target: Lv." .. perPlantTargetLevel .. ")", Type = "success", Duration = 3 })
+            else
+                stopUpgrading = true
+                VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade stopped.", Type = "warning", Duration = 3 })
+            end
+        end,
+    })
+
+    TabUpgrade:AddButton({
+        Label    = "↺ Rescan plants",
+        Callback = function()
+            fullRescan(false)
+            VoidUI:Notify({ Title = "Upgrade Plants", Message = "Plants rescanned.", Type = "info", Duration = 2 })
+        end,
+    })
+
+    TabUpgrade:AddButton({
+        Label    = "Select all",
+        Callback = function()
+            local seen = {}
+            for _, item in ipairs(plantCardItems) do
+                local pName = pNameByCardName[item.Name]
+                if pName and not seen[pName] then
+                    seen[pName] = true
+                    selectedPlantsForUpgrade[pName] = true
+                    local model = modelByCardName[item.Name]
+                    if model and not highlightParts[pName] then
+                        addHighlight(pName, model)
+                    end
                 end
-                upgrading = false
-            end)
-            VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade started (target: Lv." .. perPlantTargetLevel .. ")", Type = "success", Duration = 3 })
-        else
-            stopUpgrading = true
-            VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade stopped.", Type = "warning", Duration = 3 })
-        end
-    end,
-})
+            end
+            VoidUI:Notify({ Title = "Selection", Message = "All plants selected.", Type = "info", Duration = 2 })
+        end,
+    })
 
-TabUpgrade:AddButton({
-    Label    = "↺ Rescan plants",
-    Callback = function()
-        clearAllHighlights()
-        selectedPlantsForUpgrade = {}
-        scanPlants()
-        VoidUI:Notify({ Title = "Upgrade Plants", Message = "Plants rescanned.", Type = "info", Duration = 2 })
-    end,
-})
+    TabUpgrade:AddButton({
+        Label    = "Deselect all",
+        Callback = function()
+            clearAllHighlights()
+            selectedPlantsForUpgrade = {}
+            VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
+        end,
+    })
 
-TabUpgrade:AddButton({
-    Label    = "Select all",
-    Callback = function()
-        for _, item in ipairs(plantCardItems) do
-            selectCard(item.Name)
-        end
-        VoidUI:Notify({ Title = "Selection", Message = "All plants selected.", Type = "info", Duration = 2 })
-    end,
-})
+    TabUpgrade:AddCardGrid({
+        Items    = plantCardItems,
+        Columns  = 4,
+        Callback = function(sel)
+            -- sel contient les cardNames — on traduit en pNames
+            local newPNames = {}
+            for cardName in pairs(sel) do
+                local pName = pNameByCardName[cardName]
+                if pName then newPNames[pName] = true end
+            end
+            -- Retire les pNames désélectionnés
+            for pName in pairs(selectedPlantsForUpgrade) do
+                if not newPNames[pName] then
+                    selectedPlantsForUpgrade[pName] = nil
+                    removeHighlight(pName)
+                end
+            end
+            -- Ajoute les nouveaux pNames
+            for cardName in pairs(sel) do
+                local pName = pNameByCardName[cardName]
+                if pName and not selectedPlantsForUpgrade[pName] then
+                    selectedPlantsForUpgrade[pName] = true
+                    local model = modelByCardName[cardName]
+                    if model then addHighlight(pName, model) end
+                end
+            end
+        end,
+    })
+end
 
-TabUpgrade:AddButton({
-    Label    = "Deselect all",
-    Callback = function()
-        clearAllHighlights()
-        selectedPlantsForUpgrade = {}
-        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
-    end,
-})
-
-TabUpgrade:AddCardGrid({
-    Items    = plantCardItems,
-    Columns  = 4,
-    Callback = function(sel)
-        for cardName in pairs(selectedPlantsForUpgrade) do
-            if not sel[cardName] then deselectCard(cardName) end
-        end
-        for cardName in pairs(sel) do
-            if not selectedPlantsForUpgrade[cardName] then selectCard(cardName) end
-        end
-    end,
-})
+rebuildTabContent()
 
 -- ════════════════════════════════════════════════════════
 --  HELPERS COMPOSTER

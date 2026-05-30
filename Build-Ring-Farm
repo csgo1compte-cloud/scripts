@@ -3,7 +3,7 @@
 -- Enable Auto-Collect to sell your crates every 2 minutes.
 
 local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
-VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF-V5")
+VoidUI:SetScriptName("Build-A-Ring-Farm Script")
 VoidUI:ShowCredit(function()
 print("V4")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -134,6 +134,17 @@ local seedGroups = {}
 for _, r in ipairs(rarityOrder) do
     if #seedsByRarity[r] > 0 then
         table.insert(seedGroups, { Label = r, Items = seedsByRarity[r] })
+    end
+end
+
+-- ── Icônes par nom de plante (pour le tab Upgrade Plants) ──
+local iconByPlantName = {}
+for _, child in ipairs(seedScrollFrame:GetChildren()) do
+    if child:IsA("Frame") then
+        local icon = child:FindFirstChild("Icon")
+        if icon then
+            iconByPlantName[child.Name] = icon.Image
+        end
     end
 end
 
@@ -340,6 +351,169 @@ local function optimizePets()
     until false
 
     VoidUI:Notify({ Title = "Pets", Message = "Optimisation terminée.", Type = "success", Duration = 3 })
+end
+
+-- ════════════════════════════════════════════════════════
+--  UPGRADE PLANTS — HELPERS
+-- ════════════════════════════════════════════════════════
+
+-- Sphères Neon violettes au-dessus des plantes sélectionnées
+local highlightParts = {}  -- cardName → { part, running }
+
+local function addHighlight(cardName, plantModel)
+    if highlightParts[cardName] then return end
+    local cf = plantModel:GetPivot()
+    local sphere = Instance.new("Part")
+    sphere.Name             = "VoidUI_Highlight"
+    sphere.Shape            = Enum.PartType.Ball
+    sphere.Size             = Vector3.new(1.8, 1.8, 1.8)
+    sphere.CFrame           = cf + Vector3.new(0, 9, 0)
+    sphere.Anchored         = true
+    sphere.CanCollide       = false
+    sphere.CastShadow       = false
+    sphere.Material         = Enum.Material.Neon
+    sphere.Color            = Color3.fromRGB(130, 80, 255)
+    sphere.Parent           = workspace
+    local running = true
+    task.spawn(function()
+        while running and sphere and sphere.Parent do
+            for i = 1, 20 do
+                if not running then break end
+                local s = 1.5 + 0.75 * math.sin((i/20) * math.pi)
+                sphere.Size = Vector3.new(s, s, s)
+                task.wait(0.05)
+            end
+            for i = 1, 20 do
+                if not running then break end
+                local s = 2.25 - 0.75 * math.sin((i/20) * math.pi)
+                sphere.Size = Vector3.new(s, s, s)
+                task.wait(0.05)
+            end
+        end
+    end)
+    highlightParts[cardName] = { part = sphere, stop = function() running = false end }
+end
+
+local function removeHighlight(cardName)
+    local entry = highlightParts[cardName]
+    if entry then
+        entry.stop()
+        entry.part:Destroy()
+        highlightParts[cardName] = nil
+    end
+end
+
+local function clearAllHighlights()
+    for cardName in pairs(highlightParts) do
+        removeHighlight(cardName)
+    end
+end
+
+-- Tables des plantes
+local plantCardItems  = {}
+local dirtByCardName  = {}
+local modelByCardName = {}
+
+local function buildCardName(pName, lvl, counter)
+    return "[Lv." .. lvl .. "] " .. pName .. " #" .. counter
+end
+
+local function scanPlants()
+    for i = #plantCardItems, 1, -1 do plantCardItems[i] = nil end
+    for k in pairs(dirtByCardName)  do dirtByCardName[k]  = nil end
+    for k in pairs(modelByCardName) do modelByCardName[k] = nil end
+
+    local counters = {}
+    local raw      = {}
+    for _, fp in ipairs(getFarmPlots()) do
+        for _, plant in ipairs(fp:GetChildren()) do
+            local dirt  = plant:FindFirstChild("Dirt")
+            local pName = dirt and dirt:GetAttribute("PlantName")
+            if dirt and pName then
+                local lvl = dirt:GetAttribute("PlantLevel") or 0
+                table.insert(raw, { pName = pName, lvl = lvl, dirt = dirt, model = plant })
+            end
+        end
+    end
+    table.sort(raw, function(a, b) return a.pName < b.pName end)
+    for _, entry in ipairs(raw) do
+        counters[entry.pName] = (counters[entry.pName] or 0) + 1
+        local cardName = buildCardName(entry.pName, entry.lvl, counters[entry.pName])
+        dirtByCardName[cardName]  = entry.dirt
+        modelByCardName[cardName] = entry.model
+        table.insert(plantCardItems, { Name = cardName, Icon = iconByPlantName[entry.pName] or "" })
+    end
+end
+
+scanPlants()
+
+-- Sélection
+local selectedPlantsForUpgrade = {}
+
+local function selectCard(cardName)
+    if selectedPlantsForUpgrade[cardName] then return end
+    selectedPlantsForUpgrade[cardName] = true
+    local model = modelByCardName[cardName]
+    if model then addHighlight(cardName, model) end
+end
+
+local function deselectCard(cardName)
+    if not selectedPlantsForUpgrade[cardName] then return end
+    selectedPlantsForUpgrade[cardName] = nil
+    removeHighlight(cardName)
+end
+
+-- Refresh des niveaux (migre la sélection et les highlights vers les nouveaux noms)
+local function refreshCardLevels()
+    local oldSelected = {}
+    for k in pairs(selectedPlantsForUpgrade) do oldSelected[k] = true end
+    clearAllHighlights()
+    selectedPlantsForUpgrade = {}
+
+    -- Relit les niveaux depuis les dirt refs
+    local byDirt = {}
+    for oldName, dirt in pairs(dirtByCardName) do
+        byDirt[dirt] = { oldName = oldName, model = modelByCardName[oldName] }
+    end
+
+    local raw = {}
+    for dirt, info in pairs(byDirt) do
+        local pName = dirt:GetAttribute("PlantName")
+        if pName then
+            table.insert(raw, {
+                pName   = pName,
+                lvl     = dirt:GetAttribute("PlantLevel") or 0,
+                dirt    = dirt,
+                model   = info.model,
+                oldName = info.oldName,
+            })
+        end
+    end
+    table.sort(raw, function(a, b) return a.pName < b.pName end)
+
+    local newDirt  = {}
+    local newModel = {}
+    local newItems = {}
+    local counters = {}
+
+    for _, entry in ipairs(raw) do
+        counters[entry.pName] = (counters[entry.pName] or 0) + 1
+        local newName = buildCardName(entry.pName, entry.lvl, counters[entry.pName])
+        newDirt[newName]  = entry.dirt
+        newModel[newName] = entry.model
+        table.insert(newItems, { Name = newName, Icon = iconByPlantName[entry.pName] or "" })
+        if oldSelected[entry.oldName] then
+            selectedPlantsForUpgrade[newName] = true
+            if entry.model then addHighlight(newName, entry.model) end
+        end
+    end
+
+    for i = #plantCardItems, 1, -1 do plantCardItems[i] = nil end
+    for k in pairs(dirtByCardName)  do dirtByCardName[k]  = nil end
+    for k in pairs(modelByCardName) do modelByCardName[k] = nil end
+    for _, v in ipairs(newItems)    do table.insert(plantCardItems, v) end
+    for k, v in pairs(newDirt)      do dirtByCardName[k]  = v end
+    for k, v in pairs(newModel)     do modelByCardName[k] = v end
 end
 
 -- ════════════════════════════════════════════════════════
@@ -632,40 +806,6 @@ TabCtrl:AddToggle({
     end,
 })
 
--- ── Auto-Upgrade ──
-TabCtrl:AddLabel("Auto-Upgrade Plants")
-local targetLevel = 10
-TabCtrl:AddSlider({ Label = "Target level", Min = 1, Max = 75, Default = 10, Callback = function(v) targetLevel = v end })
-TabCtrl:AddButton({
-    Label  = "▶ Upgrade all plants",
-    Colors = { Color3.fromRGB(255, 140, 40), Color3.fromRGB(255, 200, 40) },
-    Callback = function()
-        local farmPlots = getFarmPlots()
-        if #farmPlots == 0 then
-            VoidUI:Notify({ Title = "Error", Message = "FarmPlot not found!", Type = "error", Duration = 3 })
-            return
-        end
-        task.spawn(function()
-            local upgraded = 0
-            for _, fp in ipairs(farmPlots) do
-                for _, plant in ipairs(fp:GetChildren()) do
-                    local dirt = plant:FindFirstChild("Dirt")
-                    if dirt and dirt:GetAttribute("PlantLevel") ~= nil then
-                        local lvl = dirt:GetAttribute("PlantLevel") or 0
-                        while lvl < targetLevel do
-                            ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
-                            task.wait(0.1)
-                            lvl = dirt:GetAttribute("PlantLevel") or 0
-                        end
-                        upgraded += 1
-                    end
-                end
-            end
-            VoidUI:Notify({ Title = "Done!", Message = upgraded .. " plant(s) upgraded to level " .. targetLevel, Type = "success", Duration = 4 })
-        end)
-    end,
-})
-
 -- ── Auto-Fertilizer ──
 TabCtrl:AddLabel("Auto-Fertilizer")
 local fertilizing     = false
@@ -783,6 +923,114 @@ TabCtrl:AddToggle({
 })
 
 -- ════════════════════════════════════════════════════════
+--  TAB UPGRADE PLANTS
+-- ════════════════════════════════════════════════════════
+local TabUpgrade = Win:AddTab("Upgrade Plants")
+
+TabUpgrade:AddLabel("Per-plant upgrade — select below")
+
+local perPlantTargetLevel = 10
+TabUpgrade:AddTextInput({
+    Label       = "Target level",
+    Placeholder = "10",
+    Callback    = function(v)
+        local n = tonumber(v)
+        if n then perPlantTargetLevel = math.clamp(math.floor(n), 1, 75) end
+    end,
+})
+
+local upgrading        = false
+local stopUpgrading    = false
+local upgradeToggleRef = nil
+
+upgradeToggleRef = TabUpgrade:AddToggle({
+    Label    = "▶ Auto-Upgrade selected plants",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if upgrading then return end
+            if next(selectedPlantsForUpgrade) == nil then
+                VoidUI:Notify({ Title = "Upgrade", Message = "No plants selected.", Type = "warning", Duration = 3 })
+                if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
+                return
+            end
+            upgrading = true; stopUpgrading = false
+            task.spawn(function()
+                while not stopUpgrading do
+                    local allDone = true
+                    for cardName in pairs(selectedPlantsForUpgrade) do
+                        if stopUpgrading then break end
+                        local dirt = dirtByCardName[cardName]
+                        if not dirt then continue end
+                        local lvl = dirt:GetAttribute("PlantLevel") or 0
+                        if lvl >= perPlantTargetLevel then continue end
+                        allDone = false
+                        local ok, result = pcall(function()
+                            return ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
+                        end)
+                        if not ok or (type(result) == "boolean" and result == false) then
+                            VoidUI:Notify({ Title = "Upgrade", Message = "Refused — refreshing & waiting 60s", Type = "warning", Duration = 5 })
+                            refreshCardLevels()
+                            local elapsed = 0
+                            while elapsed < 60 and not stopUpgrading do
+                                task.wait(1); elapsed += 1
+                            end
+                        else
+                            task.wait(0.1)
+                        end
+                    end
+                    if not stopUpgrading then
+                        refreshCardLevels()
+                        if allDone then
+                            VoidUI:Notify({ Title = "Upgrade", Message = "All plants reached level " .. perPlantTargetLevel, Type = "success", Duration = 4 })
+                            stopUpgrading = true
+                            if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
+                        end
+                    end
+                end
+                upgrading = false
+            end)
+            VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade started (target: Lv." .. perPlantTargetLevel .. ")", Type = "success", Duration = 3 })
+        else
+            stopUpgrading = true
+            VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabUpgrade:AddButton({
+    Label    = "Select all",
+    Callback = function()
+        for _, item in ipairs(plantCardItems) do
+            selectCard(item.Name)
+        end
+        VoidUI:Notify({ Title = "Selection", Message = "All plants selected.", Type = "info", Duration = 2 })
+    end,
+})
+
+TabUpgrade:AddButton({
+    Label    = "Deselect all",
+    Callback = function()
+        clearAllHighlights()
+        selectedPlantsForUpgrade = {}
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
+    end,
+})
+
+TabUpgrade:AddCardGrid({
+    Items    = plantCardItems,
+    Columns  = 4,
+    Callback = function(sel)
+        for cardName in pairs(selectedPlantsForUpgrade) do
+            if not sel[cardName] then deselectCard(cardName) end
+        end
+        for cardName in pairs(sel) do
+            if not selectedPlantsForUpgrade[cardName] then selectCard(cardName) end
+        end
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
 --  HELPERS COMPOSTER
 -- ════════════════════════════════════════════════════════
 
@@ -892,38 +1140,28 @@ TabComposter:AddLabel("Uses seeds selected in 'Seeds to Compost' tab")
 local function runCompostLoop()
     while not stopComposting do
         local seedTools = getSelectedSeedTools()
-
         if #seedTools == 0 then
             task.wait(5)
             continue
         end
-
         for _, entry in ipairs(seedTools) do
             if stopComposting then break end
-
             local seedKey = entry.plantName .. "_" .. entry.level .. "_" .. entry.mutation
-
             local ok, err = pcall(function()
                 Composter.InsertSeed:InvokeServer(composterFloor, seedKey, 1)
             end)
-
             if not ok then
                 VoidUI:Notify({ Title = "Error", Message = "InsertSeed failed: " .. tostring(err), Type = "error", Duration = 3 })
                 task.wait(0.5)
                 continue
             end
-
             task.wait(0.2)
-
             local state = nil
             pcall(function()
                 state = Composter.RequestState:InvokeServer(composterFloor)
             end)
-
             if not state then task.wait(0.3); continue end
-
             local shouldPull = false
-
             if state.TooRich then
                 shouldPull = true
                 VoidUI:Notify({ Title = "Composter F" .. composterFloor, Message = "TooRich! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
@@ -931,15 +1169,11 @@ local function runCompostLoop()
                 shouldPull = true
                 VoidUI:Notify({ Title = "Composter F3", Message = "25T reached! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
             end
-
             if shouldPull then
-                pcall(function()
-                    Composter.PullLever:InvokeServer(composterFloor)
-                end)
+                pcall(function() Composter.PullLever:InvokeServer(composterFloor) end)
                 task.wait(1)
                 break
             end
-
             task.wait(0.1)
         end
     end

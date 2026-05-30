@@ -3,7 +3,7 @@
 -- Enable Auto-Collect to sell your crates every 2 minutes.
 
 local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
-VoidUI:SetScriptName("Build-A-Ring-Farm Script")
+VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF")
 VoidUI:ShowCredit(function()
 print("V4")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -806,6 +806,47 @@ TabCtrl:AddToggle({
     end,
 })
 
+-- ── Auto-Upgrade (général, tab Auto) ──
+TabCtrl:AddLabel("Auto-Upgrade Plants")
+local targetLevel = 10
+TabCtrl:AddSlider({ Label = "Target level", Min = 1, Max = 75, Default = 10, Callback = function(v) targetLevel = v end })
+TabCtrl:AddButton({
+    Label  = "▶ Upgrade all plants",
+    Colors = { Color3.fromRGB(255, 140, 40), Color3.fromRGB(255, 200, 40) },
+    Callback = function()
+        local farmPlots = getFarmPlots()
+        if #farmPlots == 0 then
+            VoidUI:Notify({ Title = "Error", Message = "FarmPlot not found!", Type = "error", Duration = 3 })
+            return
+        end
+        task.spawn(function()
+            local upgraded = 0
+            for _, fp in ipairs(farmPlots) do
+                for _, plant in ipairs(fp:GetChildren()) do
+                    local dirt = plant:FindFirstChild("Dirt")
+                    if dirt and dirt:GetAttribute("PlantLevel") ~= nil then
+                        local lvl = dirt:GetAttribute("PlantLevel") or 0
+                        while lvl < targetLevel do
+                            local ok, result = pcall(function()
+                                return ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
+                            end)
+                            if not ok or (type(result) == "boolean" and result == false) then
+                                VoidUI:Notify({ Title = "Upgrade", Message = "Refused — waiting 60s", Type = "warning", Duration = 5 })
+                                task.wait(60)
+                            else
+                                task.wait(0.1)
+                            end
+                            lvl = dirt:GetAttribute("PlantLevel") or 0
+                        end
+                        upgraded += 1
+                    end
+                end
+            end
+            VoidUI:Notify({ Title = "Done!", Message = upgraded .. " plant(s) upgraded to level " .. targetLevel, Type = "success", Duration = 4 })
+        end)
+    end,
+})
+
 -- ── Auto-Fertilizer ──
 TabCtrl:AddLabel("Auto-Fertilizer")
 local fertilizing     = false
@@ -970,7 +1011,7 @@ upgradeToggleRef = TabUpgrade:AddToggle({
                         end)
                         if not ok or (type(result) == "boolean" and result == false) then
                             VoidUI:Notify({ Title = "Upgrade", Message = "Refused — refreshing & waiting 60s", Type = "warning", Duration = 5 })
-                            refreshCardLevels()
+                            scanPlants()
                             local elapsed = 0
                             while elapsed < 60 and not stopUpgrading do
                                 task.wait(1); elapsed += 1
@@ -980,7 +1021,7 @@ upgradeToggleRef = TabUpgrade:AddToggle({
                         end
                     end
                     if not stopUpgrading then
-                        refreshCardLevels()
+                        scanPlants()
                         if allDone then
                             VoidUI:Notify({ Title = "Upgrade", Message = "All plants reached level " .. perPlantTargetLevel, Type = "success", Duration = 4 })
                             stopUpgrading = true
@@ -995,6 +1036,16 @@ upgradeToggleRef = TabUpgrade:AddToggle({
             stopUpgrading = true
             VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade stopped.", Type = "warning", Duration = 3 })
         end
+    end,
+})
+
+TabUpgrade:AddButton({
+    Label    = "↺ Rescan plants",
+    Callback = function()
+        clearAllHighlights()
+        selectedPlantsForUpgrade = {}
+        scanPlants()
+        VoidUI:Notify({ Title = "Upgrade Plants", Message = "Plants rescanned.", Type = "info", Duration = 2 })
     end,
 })
 

@@ -65,10 +65,14 @@ end
 
 local function getFarmPlots()
     local out = {}
-    for _, name in ipairs({"FarmPlot", "SecondFloor", "ThirdFloor"}) do
-        local node = myPlot:FindFirstChild(name)
-        if node then
-            local fp = name == "FarmPlot" and node or node:FindFirstChild("FarmPlot")
+    -- Floor 1 : FarmPlot direct dans myPlot
+    local fp1 = myPlot:FindFirstChild("FarmPlot")
+    if fp1 then table.insert(out, fp1) end
+    -- Floor 2, 3, 4 : dans Floor2/Floor3/Floor4
+    for i = 2, 4 do
+        local floor = myPlot:FindFirstChild("Floor" .. i)
+        if floor then
+            local fp = floor:FindFirstChild("FarmPlot")
             if fp then table.insert(out, fp) end
         end
     end
@@ -107,8 +111,8 @@ local function getUnfertilizedDirt()
     return nil
 end
 
--- ── Seeds from game UI ──
-local seedScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PlantsFrame
+-- ── Seeds from game UI (nouveau chemin) ──
+local seedScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PlantsFrame:WaitForChild("PlantsFrame")
 
 local rarityOrder = {
     "Common", "Uncommon", "Rare", "Epic", "Legendary",
@@ -209,21 +213,21 @@ local function getPetTeleportCFrame(floorIndex)
     local sign
     if floorIndex == 1 then
         sign = myPlot:FindFirstChild("PlotUpgradeSign")
-    elseif floorIndex == 2 then
-        local sf = myPlot:FindFirstChild("SecondFloor")
-        sign = sf and sf:FindFirstChild("PlotUpgradeSign")
-    elseif floorIndex == 3 then
-        local tf = myPlot:FindFirstChild("ThirdFloor")
-        sign = tf and tf:FindFirstChild("PlotUpgradeSign")
+    else
+        local floor = myPlot:FindFirstChild("Floor" .. floorIndex)
+        sign = floor and floor:FindFirstChild("PlotUpgradeSign")
     end
     return sign and sign:GetPivot()
 end
 
 local function getUnlockedFloors()
     local floors = {}
-    if myPlot:FindFirstChild("FarmPlot") then table.insert(floors, 1) end
-    if myPlot:FindFirstChild("SecondFloor") then table.insert(floors, 2) end
-    if myPlot:FindFirstChild("ThirdFloor") then table.insert(floors, 3) end
+    for i = 1, 4 do
+        local floorName = i == 1 and "Floor" or "Floor" .. i
+        if myPlot:FindFirstChild(floorName) then
+            table.insert(floors, i)
+        end
+    end
     return floors
 end
 
@@ -357,8 +361,6 @@ end
 --  UPGRADE PLANTS — HELPERS
 -- ════════════════════════════════════════════════════════
 
--- Sphères Neon violettes — indexées par pName (nom de plante)
--- car la sélection est maintenant basée sur pName
 local highlightParts = {}  -- pName → { part, stop }
 
 local function addHighlight(pName, plantModel)
@@ -410,32 +412,27 @@ local function clearAllHighlights()
     end
 end
 
--- Sélection basée sur pName (PlantName attribute)
--- { [pName] = true }  — survit aux rescans
 local selectedPlantsForUpgrade = {}
 
--- Tables des plantes (reconstruites à chaque scan)
-local plantCardItems  = {}   -- { Name = cardName, Icon = ... }
-local dirtByCardName  = {}   -- cardName → dirt
-local modelByCardName = {}   -- cardName → plantModel
-local pNameByCardName = {}   -- cardName → pName
+local plantCardItems     = {}   -- { Name = cardName, Icon = ... }
+local dirtByCardName     = {}   -- cardName → dirt
+local modelByCardName    = {}   -- cardName → plantModel
+local pNameByCardName    = {}   -- cardName → pName
+local nameLabelByCardName = {}  -- cardName → TextLabel (pour update niveau)
 
 local function buildCardName(pName, lvl, counter)
     return "[Lv." .. lvl .. "] " .. pName .. " #" .. counter
 end
 
--- TabUpgrade ref — définie plus bas, utilisée dans fullRescan
 local TabUpgrade = nil
 
--- Rebuild complet des cards du tab (Tab:Clear() + recréation)
 local function fullRescan(keepSelection)
-    -- 1. Vide les tables internes
     for i = #plantCardItems, 1, -1 do plantCardItems[i] = nil end
-    for k in pairs(dirtByCardName)  do dirtByCardName[k]  = nil end
-    for k in pairs(modelByCardName) do modelByCardName[k] = nil end
-    for k in pairs(pNameByCardName) do pNameByCardName[k] = nil end
+    for k in pairs(dirtByCardName)      do dirtByCardName[k]      = nil end
+    for k in pairs(modelByCardName)     do modelByCardName[k]     = nil end
+    for k in pairs(pNameByCardName)     do pNameByCardName[k]     = nil end
+    for k in pairs(nameLabelByCardName) do nameLabelByCardName[k] = nil end
 
-    -- 2. Garde les pNames sélectionnés si demandé
     local prevSelected = {}
     if keepSelection then
         for pName in pairs(selectedPlantsForUpgrade) do
@@ -443,11 +440,9 @@ local function fullRescan(keepSelection)
         end
     end
 
-    -- 3. Vide les highlights (on les recréera après)
     clearAllHighlights()
     selectedPlantsForUpgrade = {}
 
-    -- 4. Scan du plot
     local counters = {}
     local raw      = {}
     for _, fp in ipairs(getFarmPlots()) do
@@ -471,9 +466,7 @@ local function fullRescan(keepSelection)
         table.insert(plantCardItems, { Name = cardName, Icon = iconByPlantName[entry.pName] or "" })
     end
 
-    -- 5. Restaure la sélection par pName (les plantes disparues sont ignorées)
     if keepSelection then
-        -- On garde une seule highlight par pName (première instance trouvée)
         local seen = {}
         for _, item in ipairs(plantCardItems) do
             local pName = pNameByCardName[item.Name]
@@ -488,7 +481,6 @@ local function fullRescan(keepSelection)
         end
     end
 
-    -- 6. Rebuild des cards dans le tab (Tab:Clear() + AddCardGrid)
     if TabUpgrade then
         TabUpgrade:Clear()
         rebuildTabContent()
@@ -952,8 +944,6 @@ local upgrading        = false
 local stopUpgrading    = false
 local upgradeToggleRef = nil
 
--- Fonction qui (re)construit tout le contenu du tab
--- Appelée au démarrage et à chaque fullRescan
 function rebuildTabContent()
     TabUpgrade:AddLabel("Per-plant upgrade — select below")
 
@@ -983,8 +973,6 @@ function rebuildTabContent()
                     while not stopUpgrading do
                         local allDone = true
 
-                        -- Itère sur les pNames sélectionnés
-                        -- Collecte d'abord les dirt refs correspondants
                         local dirtsToUpgrade = {}
                         for _, item in ipairs(plantCardItems) do
                             local pName = pNameByCardName[item.Name]
@@ -1076,20 +1064,17 @@ function rebuildTabContent()
         Items    = plantCardItems,
         Columns  = 4,
         Callback = function(sel)
-            -- sel contient les cardNames — on traduit en pNames
             local newPNames = {}
             for cardName in pairs(sel) do
                 local pName = pNameByCardName[cardName]
                 if pName then newPNames[pName] = true end
             end
-            -- Retire les pNames désélectionnés
             for pName in pairs(selectedPlantsForUpgrade) do
                 if not newPNames[pName] then
                     selectedPlantsForUpgrade[pName] = nil
                     removeHighlight(pName)
                 end
             end
-            -- Ajoute les nouveaux pNames
             for cardName in pairs(sel) do
                 local pName = pNameByCardName[cardName]
                 if pName and not selectedPlantsForUpgrade[pName] then
@@ -1099,10 +1084,41 @@ function rebuildTabContent()
                 end
             end
         end,
+
+        -- Hook post-création pour stocker les nameLabels et brancher les listeners
+        OnCardCreated = function(cardName, nameLabel)
+            nameLabelByCardName[cardName] = nameLabel
+
+            local dirt = dirtByCardName[cardName]
+            if not dirt then return end
+
+            dirt:GetAttributeChangedSignal("PlantLevel"):Connect(function()
+                local newLvl   = dirt:GetAttribute("PlantLevel") or 0
+                local pName    = pNameByCardName[cardName]
+                local counter  = cardName:match("#(%d+)$") or "?"
+                local newText  = "[Lv." .. newLvl .. "] " .. (pName or "?") .. " #" .. counter
+                local lbl      = nameLabelByCardName[cardName]
+                if lbl and lbl.Parent then
+                    lbl.Text = newText
+                end
+            end)
+        end,
     })
 end
 
-rebuildTabContent()
+-- Scan initial : attend que FarmPlot soit peuplé avant de construire les cards
+task.spawn(function()
+    local fp = myPlot:WaitForChild("FarmPlot", 15)
+    if fp then
+        local timeout = 0
+        while #fp:GetChildren() == 0 and timeout < 10 do
+            task.wait(0.5)
+            timeout += 0.5
+        end
+    end
+    task.wait(0.5)
+    fullRescan(false)
+end)
 
 -- ════════════════════════════════════════════════════════
 --  HELPERS COMPOSTER
@@ -1328,7 +1344,7 @@ local TabSellPets = Win:AddTab("Sell Pets")
 
 local selectedPets = {}
 
-local petScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PetsFrame
+local petScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PetsFrame.PetsFrame
 
 local petItems = {}
 
@@ -1478,6 +1494,284 @@ TabPets:AddButton({
     Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         task.spawn(optimizePets)
+    end,
+})
+
+-- ════════════════════════════════════════════════════════
+--  TAB PLANT RUSH
+-- ════════════════════════════════════════════════════════
+local TabPlantRush = Win:AddTab("PlantRush")
+
+local Camera         = workspace.CurrentCamera
+local RunService     = game:GetService("RunService")
+
+local plantRushActive   = false
+local stopPlantRush     = false
+local collectActive     = false
+local stopCollect       = false
+local aimlockConnection = nil
+local currentTarget     = nil
+
+-- Scan des models dans PlantRush.Runtime
+local function scanPlantRushTargets()
+    local runtime = workspace:FindFirstChild("InteractiveEvents")
+        and workspace.InteractiveEvents:FindFirstChild("PlantRush")
+        and workspace.InteractiveEvents.PlantRush:FindFirstChild("Runtime")
+    if not runtime then return nil end
+    for _, child in ipairs(runtime:GetChildren()) do
+        if child:IsA("Model") then
+            -- Retourne le premier model valide (encore présent)
+            local pivot = pcall(function() return child:GetPivot() end)
+            if child.Parent then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
+local function getRuntimeCount()
+    local runtime = workspace:FindFirstChild("InteractiveEvents")
+        and workspace.InteractiveEvents:FindFirstChild("PlantRush")
+        and workspace.InteractiveEvents.PlantRush:FindFirstChild("Runtime")
+    if not runtime then return 0 end
+    local count = 0
+    for _, child in ipairs(runtime:GetChildren()) do
+        if child:IsA("Model") then count += 1 end
+    end
+    return count
+end
+
+-- Équipe le Tomato Shooter
+local function equipShooter()
+    local tool = player.Backpack:FindFirstChild("Tomato Shooter")
+        or (character and character:FindFirstChild("Tomato Shooter"))
+    if tool and tool.Parent == player.Backpack then
+        humanoid:EquipTool(tool)
+        return true
+    elseif tool then
+        return true -- déjà équipé
+    end
+    return false
+end
+
+-- Déséquipe tout
+local function unequipShooter()
+    humanoid:UnequipTools()
+end
+
+-- Stop l'aimlock
+local function stopAimlock()
+    if aimlockConnection then
+        aimlockConnection:Disconnect()
+        aimlockConnection = nil
+    end
+    currentTarget = nil
+end
+
+-- Lance l'aimlock vers un model
+local function startAimlock(model)
+    stopAimlock()
+    currentTarget = model
+
+    aimlockConnection = RunService.RenderStepped:Connect(function()
+        -- Si la cible a disparu → rescan
+        if not currentTarget or not currentTarget.Parent then
+            currentTarget = scanPlantRushTargets()
+            if not currentTarget then
+                -- Plus de cibles → stop
+                stopAimlock()
+                return
+            end
+        end
+
+        -- Oriente la caméra vers le centre du model
+        local ok, pivot = pcall(function() return currentTarget:GetPivot() end)
+        if ok and pivot then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, pivot.Position)
+        end
+    end)
+end
+
+TabPlantRush:AddLabel("Auto-Shoot (Tomato Shooter)")
+
+TabPlantRush:AddToggle({
+    Label    = "Enable Auto-Shoot",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if plantRushActive then return end
+
+            -- Vérifie que le tool est dispo
+            if not player.Backpack:FindFirstChild("Tomato Shooter")
+                and not (character and character:FindFirstChild("Tomato Shooter")) then
+                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found in backpack!", Type = "error", Duration = 4 })
+                return
+            end
+
+            plantRushActive = true
+            stopPlantRush   = false
+
+            task.spawn(function()
+                while not stopPlantRush do
+                    local runtime = workspace:FindFirstChild("InteractiveEvents")
+                        and workspace.InteractiveEvents:FindFirstChild("PlantRush")
+                        and workspace.InteractiveEvents.PlantRush:FindFirstChild("Runtime")
+
+                    if runtime then
+                        local spawnConn = runtime.ChildAdded:Connect(function(child)
+                            if stopPlantRush then return end
+                            if not child:IsA("Model") then return end
+                            task.wait(0.1)
+
+                            -- Check shooter seulement maintenant qu'un monstre est détecté
+                            if not player.Backpack:FindFirstChild("Tomato Shooter")
+                                and not (character and character:FindFirstChild("Tomato Shooter")) then
+                                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found!", Type = "error", Duration = 4 })
+                                return
+                            end
+
+                            if not equipShooter() then return end
+                            if not aimlockConnection then
+                                startAimlock(child)
+                            end
+                        end)
+
+                        -- Monstres déjà présents au moment de l'activation
+                        local existing = scanPlantRushTargets()
+                        if existing then
+                            if not player.Backpack:FindFirstChild("Tomato Shooter")
+                                and not (character and character:FindFirstChild("Tomato Shooter")) then
+                                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found!", Type = "error", Duration = 4 })
+                            else
+                                equipShooter()
+                                startAimlock(existing)
+                            end
+                        end
+
+                        while not stopPlantRush do
+                            task.wait(0.5)
+                        end
+
+                        spawnConn:Disconnect()
+                    else
+                        task.wait(1)
+                    end
+                end
+
+                stopAimlock()
+                unequipShooter()
+                plantRushActive = false
+            end)
+
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-shoot started.", Type = "success", Duration = 3 })
+        else
+            stopPlantRush = true
+            stopAimlock()
+            unequipShooter()
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-shoot stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabPlantRush:AddLabel("Auto-Collect Drops")
+
+TabPlantRush:AddToggle({
+    Label    = "Enable Auto-Collect",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if collectActive then return end
+            collectActive = true
+            stopCollect   = false
+
+            task.spawn(function()
+                while not stopCollect do
+                    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        for _, obj in ipairs(workspace:GetChildren()) do
+                            if stopCollect then break end
+                            if obj.Name:sub(1, 19) == "PlantRushLocalDrop_" and obj:IsA("BasePart") then
+                                local suffix = obj.Name:sub(20)
+
+                                -- Marche vers le drop
+                                humanoid:MoveTo(obj.Position)
+
+                                -- Attend d'être à moins de 14 studs ou timeout 10s
+                                local timeout = 0
+                                while obj.Parent
+                                    and (hrp.Position - obj.Position).Magnitude > 12
+                                    and timeout < 10
+                                    and not stopCollect
+                                do
+                                    task.wait(0.1)
+                                    timeout += 0.1
+                                end
+
+                                -- Fire seulement si on est assez proche et le drop existe encore
+                                if obj.Parent
+                                    and not stopCollect
+                                    and (hrp.Position - obj.Position).Magnitude <= 14
+                                then
+                                    pcall(function()
+                                        ReplicatedStorage.Remotes.PlantRush.DropClaim:FireServer(suffix)
+                                    end)
+                                end
+
+                                task.wait(0.2)
+                            end
+                        end
+                    end
+
+                    -- Attend 5s avant le prochain scan
+                    local elapsed = 0
+                    while elapsed < 5 and not stopCollect do
+                        task.wait(0.5)
+                        elapsed += 0.5
+                    end
+                end
+                collectActive = false
+            end)
+
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-collect started.", Type = "success", Duration = 3 })
+        else
+            stopCollect = true
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-collect stopped.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+
+TabPlantRush:AddButton({
+    Label    = "Collect now (one shot)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        task.spawn(function()
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                VoidUI:Notify({ Title = "PlantRush", Message = "Character not ready.", Type = "error", Duration = 3 })
+                return
+            end
+            local count = 0
+            for _, obj in ipairs(workspace:GetChildren()) do
+                if obj.Name:sub(1, 19) == "PlantRushLocalDrop_" and obj:IsA("BasePart") then
+                    local suffix = obj.Name:sub(20)
+                    humanoid:MoveTo(obj.Position)
+                    local timeout = 0
+                    while obj.Parent and (hrp.Position - obj.Position).Magnitude > 12 and timeout < 10 do
+                        task.wait(0.1)
+                        timeout += 0.1
+                    end
+                    if obj.Parent and (hrp.Position - obj.Position).Magnitude <= 14 then
+                        pcall(function()
+                            ReplicatedStorage.Remotes.PlantRush.DropClaim:FireServer(suffix)
+                        end)
+                        count += 1
+                    end
+                    task.wait(0.2)
+                end
+            end
+            VoidUI:Notify({ Title = "PlantRush", Message = count .. " drop(s) claimed.", Type = "success", Duration = 3 })
+        end)
     end,
 })
 

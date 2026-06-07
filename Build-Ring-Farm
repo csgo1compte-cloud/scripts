@@ -780,7 +780,7 @@ TabCtrl:AddToggle({
 -- ── Auto-Upgrade (général, tab Auto) ──
 TabCtrl:AddLabel("Auto-Upgrade Plants")
 local targetLevel = 10
-TabCtrl:AddSlider({ Label = "Target level", Min = 1, Max = 75, Default = 10, Callback = function(v) targetLevel = v end })
+TabCtrl:AddSlider({ Label = "Target level", Min = 1, Max = 120, Default = 10, Callback = function(v) targetLevel = v end })
 TabCtrl:AddButton({
     Label  = "▶ Upgrade all plants",
     Colors = { Color3.fromRGB(255, 140, 40), Color3.fromRGB(255, 200, 40) },

@@ -1,0 +1,227 @@
+--https://www.roblox.com/games/139992937215031/Drop-Balls-For-Brainrots
+local Ui = loadstring(game:HttpGet("https://raw.githubusercontent.com/csgo1compte-cloud/RayVoid/refs/heads/main/RayVoid"))()
+Ui:SetScriptName("Ball Drop Farm")
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+
+local EventBallDrop    = ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net["RE/BallDrop"]
+local EventEquip       = ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net["RF/EquipBestBrainrots"]
+local EventCollect     = ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net["RF/Collect"]
+local EventPurchase    = ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net["RF/PurchaseUpgrade"]
+local EventPurchaseSlot = ReplicatedStorage.Packages._Index["sleitnick_net@0.2.0"].net["RE/PurchaseSign"]
+
+local function parsePrice(text)
+    local clean = text:gsub("%$", ""):gsub(",", ""):lower():gsub("%s+", "")
+    local num, suffix = clean:match("^([%d%.]+)([kmb]?)$")
+    if not num then return math.huge end
+    num = tonumber(num)
+    if suffix == "k" then num = num * 1000
+    elseif suffix == "m" then num = num * 1000000
+    elseif suffix == "b" then num = num * 1000000000
+    end
+    return num
+end
+
+local function getMoney()
+    return player.leaderstats.Money.Value
+end
+
+local function getDropLevel()
+    local ok, BallDropGui = pcall(function()
+        return require(ReplicatedStorage.Client.Modules.GuiHandlers.BallDropGuiController)
+    end)
+    if ok and BallDropGui and typeof(BallDropGui.SelectedDropLevel) == "number" then
+        return BallDropGui.SelectedDropLevel
+    end
+    return 1
+end
+
+local function getDropPrice()
+    local gui = player.PlayerGui:FindFirstChild("BallDrop")
+    if not gui then return math.huge end
+    local label = gui.BottomContainer.DropButton.TextContainer.PriceLabel
+    return parsePrice(label.Text)
+end
+
+local function getPlot()
+    for _, plot in ipairs(workspace.Plots:GetChildren()) do
+        if plot:GetAttribute("Owner") == player.Name then
+            return plot
+        end
+    end
+    return nil
+end
+
+local function collectAll()
+    local plot = getPlot()
+    if not plot then return end
+    local slots = plot:FindFirstChild("Slots")
+    if not slots then return end
+    for _, slot in ipairs(slots:GetChildren()) do
+        local num = slot.Name:match("^Slot(%d+)$")
+        if num then
+            pcall(function()
+                EventCollect:InvokeServer(plot.Name, num)
+            end)
+            task.wait(0.05)
+        end
+    end
+end
+
+local function equipBest()
+    pcall(function()
+        EventEquip:InvokeServer()
+    end)
+end
+
+local TITLE_MAP = {
+    BouncyBall  = "Bouncy Ball",
+    GoldenBall  = "Golden Ball",
+    DiamondBall = "Diamond Ball",
+    MultiBall   = "Multi-Ball",
+}
+
+local function getUpgradePrice(upgradeKey)
+    local plot = getPlot()
+    if not plot then return math.huge end
+    local frame = plot:FindFirstChild("UpgradeSign")
+        and plot.UpgradeSign:FindFirstChild("GuiPart")
+        and plot.UpgradeSign.GuiPart:FindFirstChild("SurfaceGui")
+        and plot.UpgradeSign.GuiPart.SurfaceGui:FindFirstChild("Frame")
+    if not frame then return math.huge end
+
+    local targetTitle = TITLE_MAP[upgradeKey]
+    for _, child in ipairs(frame:GetChildren()) do
+        local fg = child:FindFirstChild("Foreground")
+        if fg then
+            local titleLabel = fg:FindFirstChild("TitleLabel")
+            if titleLabel and titleLabel.Text == targetTitle then
+                local priceLabel = fg:FindFirstChild("PurchaseButton")
+                    and fg.PurchaseButton:FindFirstChild("TextContainer")
+                    and fg.PurchaseButton.TextContainer:FindFirstChild("PriceLabel")
+                if priceLabel then
+                    return parsePrice(priceLabel.Text)
+                end
+            end
+        end
+    end
+    return math.huge
+end
+
+-- ── UI ───────────────────────────────────────────────────────────────────────
+local Window  = Ui:CreateWindow({ Title = "Ball Drop Farm" })
+local Tab     = Window:CreateTab("Main")
+local ShopTab = Window:CreateTab("Auto Shop")
+
+-- Auto Drop
+local dropping = false
+Tab:CreateToggle({
+    Name = "Auto Drop",
+    CurrentValue = false,
+    Callback = function(val)
+        dropping = val
+        if dropping then
+            task.spawn(function()
+                while dropping do
+                    if getMoney() >= getDropPrice() then
+                        EventBallDrop:FireServer(getDropLevel())
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+-- Auto Collect & Equip
+local farming = false
+Tab:CreateToggle({
+    Name = "Auto Collect & Equip",
+    CurrentValue = false,
+    Callback = function(val)
+        farming = val
+        if farming then
+            task.spawn(function()
+                while farming do
+                    collectAll()
+                    equipBest()
+                    task.wait(30)
+                end
+            end)
+        end
+    end
+})
+
+-- ── Auto Shop ────────────────────────────────────────────────────────────────
+local upgrades = {
+    { name = "Bouncy Ball",  key = "BouncyBall"  },
+    { name = "Golden Ball",  key = "GoldenBall"  },
+    { name = "Diamond Ball", key = "DiamondBall" },
+    { name = "Multi-Ball",   key = "MultiBall"   },
+}
+
+local buyToggles = {}
+
+for _, upgrade in ipairs(upgrades) do
+    buyToggles[upgrade.key] = false
+    local active = false
+
+    ShopTab:CreateToggle({
+        Name = "Auto Buy " .. upgrade.name,
+        CurrentValue = false,
+        Callback = function(val)
+            buyToggles[upgrade.key] = val
+            if val and not active then
+                active = true
+                task.spawn(function()
+                    while buyToggles[upgrade.key] do
+                        local price = getUpgradePrice(upgrade.key)
+                        if getMoney() >= price then
+                            pcall(function()
+                                EventPurchase:InvokeServer(upgrade.key)
+                            end)
+                        end
+                        task.wait(30)
+                    end
+                    active = false
+                end)
+            end
+        end
+    })
+end
+
+-- Auto Buy Slot
+local buyingSlot = false
+ShopTab:CreateToggle({
+    Name = "Auto Buy Slot",
+    CurrentValue = false,
+    Callback = function(val)
+        buyingSlot = val
+        if buyingSlot then
+            task.spawn(function()
+                while buyingSlot do
+                    local plot = getPlot()
+                    if plot then
+                        local purchaseSign = plot:FindFirstChild("PurchaseSign")
+                        if purchaseSign then
+                            local ok, lbl = pcall(function()
+                                return purchaseSign.SignPart.SurfaceGui.TextButton.TextLabel
+                            end)
+                            if ok and lbl then
+                                local price = parsePrice(lbl.Text)
+                                if getMoney() >= price then
+                                    pcall(function()
+                                        EventPurchaseSlot:FireServer(purchaseSign)
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                    task.wait(30)
+                end
+            end)
+        end
+    end
+})

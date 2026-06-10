@@ -2,11 +2,10 @@
 -- The script will roll the seed machine and purchase any matching seed automatically.
 -- Enable Auto-Collect to sell your crates every 2 minutes.
 
-local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/csgo1compte-cloud/RayVoid/refs/heads/main/RayVoid"))()
-UI:SetScriptName("Build-A-Ring-Farm Premium")
-
-
-
+local VoidUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/femmehomme90-web/VoidUI/refs/heads/main/voidUI.lua"))()
+VoidUI:SetScriptName("Build-A-Ring-Farm Script-OBF")
+VoidUI:ShowCredit(function()
+print("V4")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 
@@ -33,7 +32,7 @@ for i = 1, 6 do
 end
 
 if not myPlot then
-    UI:Notify({ Title = "Error", Content = "Could not find your plot!", Duration = 4 })
+    VoidUI:Notify({ Title = "Error", Message = "Could not find your plot!", Type = "error", Duration = 4 })
     return
 end
 
@@ -66,8 +65,10 @@ end
 
 local function getFarmPlots()
     local out = {}
+    -- Floor 1 : FarmPlot direct dans myPlot
     local fp1 = myPlot:FindFirstChild("FarmPlot")
     if fp1 then table.insert(out, fp1) end
+    -- Floor 2, 3, 4 : dans Floor2/Floor3/Floor4
     for i = 2, 4 do
         local floor = myPlot:FindFirstChild("Floor" .. i)
         if floor then
@@ -110,7 +111,7 @@ local function getUnfertilizedDirt()
     return nil
 end
 
--- ── Seeds from game UI ──
+-- ── Seeds from game UI (nouveau chemin) ──
 local seedScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PlantsFrame:WaitForChild("PlantsFrame")
 
 local rarityOrder = {
@@ -140,7 +141,7 @@ for _, r in ipairs(rarityOrder) do
     end
 end
 
--- ── Icônes par nom de plante ──
+-- ── Icônes par nom de plante (pour le tab Upgrade Plants) ──
 local iconByPlantName = {}
 for _, child in ipairs(seedScrollFrame:GetChildren()) do
     if child:IsA("Frame") then
@@ -164,8 +165,8 @@ local function getShopItems()
             local rarLabel  = gearImage and gearImage:FindFirstChild("Rarity")
             if gearName and imgLabel then
                 table.insert(items, {
-                    Name       = gearName.Text,
-                    Icon       = imgLabel.Image,
+                    Name      = gearName.Text,
+                    Icon      = imgLabel.Image,
                     StockLabel = rarLabel,
                 })
             end
@@ -353,14 +354,14 @@ local function optimizePets()
 
     until false
 
-    UI:Notify({ Title = "Pets", Content = "Optimisation terminée.", Duration = 3 })
+    VoidUI:Notify({ Title = "Pets", Message = "Optimisation terminée.", Type = "success", Duration = 3 })
 end
 
 -- ════════════════════════════════════════════════════════
 --  UPGRADE PLANTS — HELPERS
 -- ════════════════════════════════════════════════════════
 
-local highlightParts = {}
+local highlightParts = {}  -- pName → { part, stop }
 
 local function addHighlight(pName, plantModel)
     if highlightParts[pName] then return end
@@ -381,13 +382,13 @@ local function addHighlight(pName, plantModel)
         while running and sphere and sphere.Parent do
             for i = 1, 20 do
                 if not running then break end
-                local s = 1.5 + 0.75 * math.sin((i/20) * math.pi)
+                local s = 1.5 + 0. * math.sin((i/20) * math.pi)
                 sphere.Size = Vector3.new(s, s, s)
                 task.wait(0.05)
             end
             for i = 1, 20 do
                 if not running then break end
-                local s = 2.25 - 0.75 * math.sin((i/20) * math.pi)
+                local s = 2.25 - 0. * math.sin((i/20) * math.pi)
                 sphere.Size = Vector3.new(s, s, s)
                 task.wait(0.05)
             end
@@ -413,11 +414,11 @@ end
 
 local selectedPlantsForUpgrade = {}
 
-local plantCardItems      = {}
-local dirtByCardName      = {}
-local modelByCardName     = {}
-local pNameByCardName     = {}
-local nameLabelByCardName = {}
+local plantCardItems     = {}   -- { Name = cardName, Icon = ... }
+local dirtByCardName     = {}   -- cardName → dirt
+local modelByCardName    = {}   -- cardName → plantModel
+local pNameByCardName    = {}   -- cardName → pName
+local nameLabelByCardName = {}  -- cardName → TextLabel (pour update niveau)
 
 local function buildCardName(pName, lvl, counter)
     return "[Lv." .. lvl .. "] " .. pName .. " #" .. counter
@@ -489,14 +490,10 @@ end
 -- ════════════════════════════════════════════════════════
 --  UI
 -- ════════════════════════════════════════════════════════
-local Win = UI:CreateWindow({
-    Name            = "BARF",
-    LoadingTitle    = "BARF",
-    LoadingSubtitle = "Build-A-Ring Farm",
-    ConfigurationSaving = {
-        Enabled  = false,
-        FileName = "BuildARingFarm",
-    },
+local Win = VoidUI:CreateWindow({
+    Title       = "BARF",
+    Size        = UDim2.new(0, 650, 0, 500),
+    TabPosition = "side",
 })
 
 local selectedSeeds = {}
@@ -507,37 +504,36 @@ local stopBuying    = false
 -- ════════════════════════════════════════════════════════
 --  TAB SEEDS
 -- ════════════════════════════════════════════════════════
-local TabSeeds = Win:CreateTab("Seeds", "leaf")
+local TabSeeds = Win:AddTab("Seeds")
 
-local seedGrid = TabSeeds:CreateFilteredCardGrid({
-    Flag     = "SelectedSeeds",
+local seedGrid = TabSeeds:AddFilteredCardGrid({
     Groups   = seedGroups,
     Columns  = 4,
     Callback = function(sel) selectedSeeds = sel end,
 })
 
-TabSeeds:CreateButton({
-    Name     = "Select all (current rarity)",
+TabSeeds:AddButton({
+    Label    = "Select all (current rarity)",
     Callback = function()
         seedGrid:SelectAll()
-        UI:Notify({ Title = "Selection", Content = "All seeds in group selected.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "All seeds in group selected.", Type = "info", Duration = 2 })
     end,
 })
 
-TabSeeds:CreateButton({
-    Name     = "Deselect all",
+TabSeeds:AddButton({
+    Label    = "Deselect all",
     Callback = function()
         seedGrid:DeselectAll()
-        UI:Notify({ Title = "Selection", Content = "Selection cleared.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
     end,
 })
 
 -- ════════════════════════════════════════════════════════
 --  TAB SHOP
 -- ════════════════════════════════════════════════════════
-local TabShop = Win:CreateTab("Shop", "shopping-cart")
+local TabShop = Win:AddTab("Shop")
 
-TabShop:CreateLabel("Gear Shop — Auto-Buy")
+TabShop:AddLabel("Gear Shop — Auto-Buy")
 
 local shopItems = getShopItems()
 local shopCardItems = {}
@@ -550,25 +546,24 @@ for _, item in ipairs(shopItems) do
     stockLabelByName[item.Name] = item.StockLabel
 end
 
-TabShop:CreateCardGrid({
-    Flag     = "SelectedGear",
+TabShop:AddCardGrid({
     Items    = shopCardItems,
     Columns  = 4,
     Callback = function(sel) selectedGear = sel end,
 })
 
-TabShop:CreateButton({
-    Name     = "Deselect all",
+TabShop:AddButton({
+    Label    = "Deselect all",
     Callback = function()
         selectedGear = {}
-        UI:Notify({ Title = "Selection", Content = "Shop selection cleared.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "Shop selection cleared.", Type = "warning", Duration = 2 })
     end,
 })
 
 -- ════════════════════════════════════════════════════════
 --  TAB EGGS
 -- ════════════════════════════════════════════════════════
-local TabEggs = Win:CreateTab("Eggs", "egg")
+local TabEggs = Win:AddTab("Eggs")
 
 local selectedEggs = {}
 local buyingEggs   = false
@@ -576,26 +571,24 @@ local stopEggs     = false
 
 local EGG_SLOTS = { "Common Egg", "Rare Egg", "Epic Egg" }
 
-TabEggs:CreateLabel("Select eggs to buy")
+TabEggs:AddLabel("Select eggs to buy")
 
 for _, eggName in ipairs(EGG_SLOTS) do
-    TabEggs:CreateToggle({
-        Name         = eggName,
-        CurrentValue = false,
-        Flag         = "Egg_" .. eggName:gsub(" ", "_"),
-        Callback     = function(state)
+    TabEggs:AddToggle({
+        Label   = eggName,
+        Default = false,
+        Callback = function(state)
             selectedEggs[eggName] = state or nil
         end,
     })
 end
 
-TabEggs:CreateLabel("Auto-Buy Eggs")
+TabEggs:AddLabel("Auto-Buy Eggs")
 
-TabEggs:CreateToggle({
-    Name         = "Enable Auto-Buy Eggs",
-    CurrentValue = false,
-    Flag         = "AutoBuyEggs",
-    Callback     = function(state)
+TabEggs:AddToggle({
+    Label   = "Enable Auto-Buy Eggs",
+    Default = false,
+    Callback = function(state)
         if state then
             if buyingEggs then return end
             buyingEggs = true; stopEggs = false
@@ -611,9 +604,10 @@ TabEggs:CreateToggle({
                                 and podium.PromptAttachment:FindFirstChild("EggShopPrompt")
                             if prompt and not prompt.ObjectText:find("Slot") then
                                 fireproximityprompt(prompt)
-                                UI:Notify({
-                                    Title    = "Egg bought!",
-                                    Content  = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                                VoidUI:Notify({
+                                    Title   = "Egg bought!",
+                                    Message = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                                    Type    = "success",
                                     Duration = 2,
                                 })
                             end
@@ -630,13 +624,14 @@ TabEggs:CreateToggle({
             end)
         else
             stopEggs = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-buy eggs stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-buy eggs stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabEggs:CreateButton({
-    Name     = "Roll Now",
+TabEggs:AddButton({
+    Label  = "Roll Now",
+    Colors = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         local live = scanEggs()
         for _, egg in ipairs(live) do
@@ -647,9 +642,10 @@ TabEggs:CreateButton({
                     and podium.PromptAttachment:FindFirstChild("EggShopPrompt")
                 if prompt and not prompt.ObjectText:find("Slot") then
                     fireproximityprompt(prompt)
-                    UI:Notify({
-                        Title    = "Egg bought!",
-                        Content  = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                    VoidUI:Notify({
+                        Title   = "Egg bought!",
+                        Message = egg.name .. " (Podium " .. egg.podiumIdx .. ")",
+                        Type    = "success",
                         Duration = 2,
                     })
                 end
@@ -662,16 +658,14 @@ TabEggs:CreateButton({
 -- ════════════════════════════════════════════════════════
 --  TAB AUTO
 -- ════════════════════════════════════════════════════════
-local TabCtrl = Win:CreateTab("Auto", "zap")
+local TabCtrl = Win:AddTab("Auto")
 
 -- ── Auto-Buy Seeds ──
-TabCtrl:CreateSection("Auto-Buy Seeds")
-
-TabCtrl:CreateToggle({
-    Name         = "Enable Auto-Buy Seeds",
-    CurrentValue = false,
-    Flag         = "AutoBuySeeds",
-    Callback     = function(state)
+TabCtrl:AddLabel("Auto-Buy Seeds")
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Buy Seeds",
+    Default = false,
+    Callback = function(state)
         if state then
             if buying then return end
             buying = true; stopBuying = false
@@ -684,7 +678,7 @@ TabCtrl:CreateToggle({
                         if stopBuying then break end
                         if selectedSeeds[seedName] then
                             ReplicatedStorage.Remotes.BuySeed:FireServer(standIdx)
-                            UI:Notify({ Title = "Purchased!", Content = seedName .. " → Stand " .. standIdx, Duration = 3 })
+                            VoidUI:Notify({ Title = "Purchased!", Message = seedName .. " → Stand " .. standIdx, Type = "success", Duration = 3 })
                             task.wait(0.5)
                         end
                     end
@@ -694,32 +688,28 @@ TabCtrl:CreateToggle({
             end)
         else
             stopBuying = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-buy seeds stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-buy seeds stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
 -- ── Auto-Buy Shop ──
-TabCtrl:CreateSection("Auto-Buy Shop")
+TabCtrl:AddLabel("Auto-Buy Shop")
 
 local shopInterval   = 120
 local buyingShop     = false
 local stopBuyingShop = false
 
-TabCtrl:CreateSlider({
-    Name         = "Scan interval (sec)",
-    Range        = {10, 300},
-    Increment    = 1,
-    CurrentValue = 120,
-    Flag         = "ShopInterval",
-    Callback     = function(v) shopInterval = v end,
+TabCtrl:AddSlider({
+    Label    = "Scan interval (sec)",
+    Min      = 10, Max = 300, Default = 120,
+    Callback = function(v) shopInterval = v end,
 })
 
-TabCtrl:CreateToggle({
-    Name         = "Enable Auto-Buy Shop",
-    CurrentValue = false,
-    Flag         = "AutoBuyShop",
-    Callback     = function(state)
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Buy Shop",
+    Default = false,
+    Callback = function(state)
         if state then
             if buyingShop then return end
             buyingShop = true; stopBuyingShop = false
@@ -736,9 +726,9 @@ TabCtrl:CreateToggle({
                                         ReplicatedStorage.Remotes.Gear.Transaction:InvokeServer(itemName)
                                     end)
                                     if ok then
-                                        UI:Notify({ Title = "Purchased!", Content = itemName .. " (" .. i .. "/" .. stock .. ")", Duration = 3 })
+                                        VoidUI:Notify({ Title = "Purchased!", Message = itemName .. " (" .. i .. "/" .. stock .. ")", Type = "success", Duration = 3 })
                                     else
-                                        UI:Notify({ Title = "Error", Content = "Failed to buy " .. itemName, Duration = 3 })
+                                        VoidUI:Notify({ Title = "Error", Message = "Failed to buy " .. itemName, Type = "error", Duration = 3 })
                                         break
                                     end
                                     task.wait(0.1)
@@ -756,60 +746,48 @@ TabCtrl:CreateToggle({
             end)
         else
             stopBuyingShop = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-buy shop stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-buy shop stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
 -- ── Auto-Collect ──
-TabCtrl:CreateSection("Auto-Collect")
-
-local collecting    = false
+TabCtrl:AddLabel("Auto-Collect")
+local collecting = false
 local stopCollecting = false
-
-TabCtrl:CreateToggle({
-    Name         = "Enable Auto-Collect",
-    CurrentValue = false,
-    Flag         = "AutoCollect",
-    Callback     = function(state)
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Collect",
+    Default = false,
+    Callback = function(state)
         if state then
             if collecting then return end
             collecting = true; stopCollecting = false
             task.spawn(function()
                 while not stopCollecting do
                     ReplicatedStorage.Remotes.SellCrates:FireServer()
-                    UI:Notify({ Title = "Collected!", Content = "Crates sold.", Duration = 2 })
+                    VoidUI:Notify({ Title = "Collected!", Message = "Crates sold.", Type = "success", Duration = 2 })
                     task.wait(120)
                 end
                 collecting = false
             end)
         else
             stopCollecting = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-collect stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-collect stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
--- ── Auto-Upgrade ──
-TabCtrl:CreateSection("Auto-Upgrade Plants")
-
+-- ── Auto-Upgrade (général, tab Auto) ──
+TabCtrl:AddLabel("Auto-Upgrade Plants")
 local targetLevel = 10
-
-TabCtrl:CreateSlider({
-    Name         = "Target level",
-    Range        = {1, 200},
-    Increment    = 1,
-    CurrentValue = 10,
-    Flag         = "TargetLevel",
-    Callback     = function(v) targetLevel = v end,
-})
-
-TabCtrl:CreateButton({
-    Name     = "Upgrade all plants",
+TabCtrl:AddSlider({ Label = "Target level", Min = 1, Max = 120, Default = 10, Callback = function(v) targetLevel = v end })
+TabCtrl:AddButton({
+    Label  = "▶ Upgrade all plants",
+    Colors = { Color3.fromRGB(255, 140, 40), Color3.fromRGB(255, 200, 40) },
     Callback = function()
         local farmPlots = getFarmPlots()
         if #farmPlots == 0 then
-            UI:Notify({ Title = "Error", Content = "FarmPlot not found!", Duration = 3 })
+            VoidUI:Notify({ Title = "Error", Message = "FarmPlot not found!", Type = "error", Duration = 3 })
             return
         end
         task.spawn(function()
@@ -824,7 +802,7 @@ TabCtrl:CreateButton({
                                 return ReplicatedStorage.Remotes.UpgradePlant:InvokeServer(dirt)
                             end)
                             if not ok or (type(result) == "boolean" and result == false) then
-                                UI:Notify({ Title = "Upgrade", Content = "Refused — waiting 60s", Duration = 5 })
+                                VoidUI:Notify({ Title = "Upgrade", Message = "Refused — waiting 60s", Type = "warning", Duration = 5 })
                                 task.wait(60)
                             else
                                 task.wait(0.1)
@@ -835,22 +813,19 @@ TabCtrl:CreateButton({
                     end
                 end
             end
-            UI:Notify({ Title = "Done!", Content = upgraded .. " plant(s) upgraded to level " .. targetLevel, Duration = 4 })
+            VoidUI:Notify({ Title = "Done!", Message = upgraded .. " plant(s) upgraded to level " .. targetLevel, Type = "success", Duration = 4 })
         end)
     end,
 })
 
 -- ── Auto-Fertilizer ──
-TabCtrl:CreateSection("Auto-Fertilizer")
-
+TabCtrl:AddLabel("Auto-Fertilizer")
 local fertilizing     = false
 local stopFertilizing = false
-
-TabCtrl:CreateToggle({
-    Name         = "Enable Auto-Fertilizer",
-    CurrentValue = false,
-    Flag         = "AutoFertilizer",
-    Callback     = function(state)
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Fertilizer",
+    Default = false,
+    Callback = function(state)
         if state then
             if fertilizing then return end
             fertilizing = true; stopFertilizing = false
@@ -877,7 +852,7 @@ TabCtrl:CreateToggle({
             end)
         else
             stopFertilizing = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-fertilizer stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-fertilizer stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
@@ -912,16 +887,13 @@ local function getMyPets()
     return out
 end
 
-TabCtrl:CreateSection("Auto-Pet Treat")
-
+TabCtrl:AddLabel("Auto-Pet Treat")
 local treatingPet     = false
 local stopTreatingPet = false
-
-TabCtrl:CreateToggle({
-    Name         = "Enable Auto-Pet Treat",
-    CurrentValue = false,
-    Flag         = "AutoPetTreat",
-    Callback     = function(state)
+TabCtrl:AddToggle({
+    Label   = "Enable Auto-Pet Treat",
+    Default = false,
+    Callback = function(state)
         if state then
             if treatingPet then return end
             treatingPet = true; stopTreatingPet = false
@@ -938,7 +910,7 @@ TabCtrl:CreateToggle({
                                     humanoid:EquipTool(tool)
                                     task.wait(0.5)
                                     ReplicatedStorage.Remotes.UsePetTreat:FireServer(pet)
-                                    UI:Notify({ Title = "Pet fed!", Content = pet.Name, Duration = 2 })
+                                    VoidUI:Notify({ Title = "Pet fed!", Message = pet.Name, Type = "success", Duration = 2 })
                                     task.wait(0.5)
                                     humanoid:UnequipTools()
                                     task.wait(0.1)
@@ -957,7 +929,7 @@ TabCtrl:CreateToggle({
             end)
         else
             stopTreatingPet = true
-            UI:Notify({ Title = "Stopped", Content = "Auto-pet treat stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Stopped", Message = "Auto-pet treat stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
@@ -965,7 +937,7 @@ TabCtrl:CreateToggle({
 -- ════════════════════════════════════════════════════════
 --  TAB UPGRADE PLANTS
 -- ════════════════════════════════════════════════════════
-TabUpgrade = Win:CreateTab("Upgrade Plants", "arrow-up")
+TabUpgrade = Win:AddTab("Upgrade Plants")
 
 local perPlantTargetLevel = 10
 local upgrading        = false
@@ -973,26 +945,26 @@ local stopUpgrading    = false
 local upgradeToggleRef = nil
 
 function rebuildTabContent()
-    TabUpgrade:CreateLabel("Per-plant upgrade — select below")
+    TabUpgrade:AddLabel("Per-plant upgrade — select below")
 
-    TabUpgrade:CreateInput({
-        Name            = "Target level",
-        PlaceholderText = tostring(perPlantTargetLevel),
-        Callback        = function(v)
+    TabUpgrade:AddTextInput({
+        Label       = "Target level",
+        Placeholder = tostring(perPlantTargetLevel),
+        Callback    = function(v)
             local n = tonumber(v)
-            if n then perPlantTargetLevel = math.clamp(math.floor(n), 1, 200) end
+            if n then perPlantTargetLevel = math.clamp(math.floor(n), 1, 1000) end
         end,
     })
 
-    upgradeToggleRef = TabUpgrade:CreateToggle({
-        Name         = "Auto-Upgrade selected plants",
-        CurrentValue = false,
-        Callback     = function(state)
+    upgradeToggleRef = TabUpgrade:AddToggle({
+        Label    = "▶ Auto-Upgrade selected plants",
+        Default  = false,
+        Callback = function(state)
             if state then
                 if upgrading then return end
                 if next(selectedPlantsForUpgrade) == nil then
-                    UI:Notify({ Title = "Upgrade", Content = "No plants selected.", Duration = 3 })
-                    if upgradeToggleRef then upgradeToggleRef:Set(false) end
+                    VoidUI:Notify({ Title = "Upgrade", Message = "No plants selected.", Type = "warning", Duration = 3 })
+                    if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
                     return
                 end
                 upgrading = true; stopUpgrading = false
@@ -1024,7 +996,7 @@ function rebuildTabContent()
                             end)
 
                             if not ok or (type(result) == "boolean" and result == false) then
-                                UI:Notify({ Title = "Upgrade", Content = "Refused — waiting 60s", Duration = 5 })
+                                VoidUI:Notify({ Title = "Upgrade", Message = "Refused — waiting 60s", Type = "warning", Duration = 5 })
                                 fullRescan(true)
                                 local elapsed = 0
                                 while elapsed < 60 and not stopUpgrading do
@@ -1036,32 +1008,32 @@ function rebuildTabContent()
                         end
 
                         if not stopUpgrading and allDone then
-                            UI:Notify({ Title = "Upgrade", Content = "All plants reached level " .. perPlantTargetLevel, Duration = 4 })
+                            VoidUI:Notify({ Title = "Upgrade", Message = "All plants reached level " .. perPlantTargetLevel, Type = "success", Duration = 4 })
                             stopUpgrading = true
-                            if upgradeToggleRef then upgradeToggleRef:Set(false) end
+                            if upgradeToggleRef then upgradeToggleRef:SetValue(false) end
                         end
                     end
                     upgrading = false
                 end)
 
-                UI:Notify({ Title = "Upgrade", Content = "Auto-upgrade started (target: Lv." .. perPlantTargetLevel .. ")", Duration = 3 })
+                VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade started (target: Lv." .. perPlantTargetLevel .. ")", Type = "success", Duration = 3 })
             else
                 stopUpgrading = true
-                UI:Notify({ Title = "Upgrade", Content = "Auto-upgrade stopped.", Duration = 3 })
+                VoidUI:Notify({ Title = "Upgrade", Message = "Auto-upgrade stopped.", Type = "warning", Duration = 3 })
             end
         end,
     })
 
-    TabUpgrade:CreateButton({
-        Name     = "Rescan plants",
+    TabUpgrade:AddButton({
+        Label    = "↺ Rescan plants",
         Callback = function()
             fullRescan(false)
-            UI:Notify({ Title = "Upgrade Plants", Content = "Plants rescanned.", Duration = 2 })
+            VoidUI:Notify({ Title = "Upgrade Plants", Message = "Plants rescanned.", Type = "info", Duration = 2 })
         end,
     })
 
-    TabUpgrade:CreateButton({
-        Name     = "Select all",
+    TabUpgrade:AddButton({
+        Label    = "Select all",
         Callback = function()
             local seen = {}
             for _, item in ipairs(plantCardItems) do
@@ -1075,20 +1047,20 @@ function rebuildTabContent()
                     end
                 end
             end
-            UI:Notify({ Title = "Selection", Content = "All plants selected.", Duration = 2 })
+            VoidUI:Notify({ Title = "Selection", Message = "All plants selected.", Type = "info", Duration = 2 })
         end,
     })
 
-    TabUpgrade:CreateButton({
-        Name     = "Deselect all",
+    TabUpgrade:AddButton({
+        Label    = "Deselect all",
         Callback = function()
             clearAllHighlights()
             selectedPlantsForUpgrade = {}
-            UI:Notify({ Title = "Selection", Content = "Selection cleared.", Duration = 2 })
+            VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
         end,
     })
 
-    TabUpgrade:CreateCardGrid({
+    TabUpgrade:AddCardGrid({
         Items    = plantCardItems,
         Columns  = 4,
         Callback = function(sel)
@@ -1113,6 +1085,7 @@ function rebuildTabContent()
             end
         end,
 
+        -- Hook post-création pour stocker les nameLabels et brancher les listeners
         OnCardCreated = function(cardName, nameLabel)
             nameLabelByCardName[cardName] = nameLabel
 
@@ -1120,11 +1093,11 @@ function rebuildTabContent()
             if not dirt then return end
 
             dirt:GetAttributeChangedSignal("PlantLevel"):Connect(function()
-                local newLvl  = dirt:GetAttribute("PlantLevel") or 0
-                local pName   = pNameByCardName[cardName]
-                local counter = cardName:match("#(%d+)$") or "?"
-                local newText = "[Lv." .. newLvl .. "] " .. (pName or "?") .. " #" .. counter
-                local lbl     = nameLabelByCardName[cardName]
+                local newLvl   = dirt:GetAttribute("PlantLevel") or 0
+                local pName    = pNameByCardName[cardName]
+                local counter  = cardName:match("#(%d+)$") or "?"
+                local newText  = "[Lv." .. newLvl .. "] " .. (pName or "?") .. " #" .. counter
+                local lbl      = nameLabelByCardName[cardName]
                 if lbl and lbl.Parent then
                     lbl.Text = newText
                 end
@@ -1133,6 +1106,7 @@ function rebuildTabContent()
     })
 end
 
+-- Scan initial : attend que FarmPlot soit peuplé avant de construire les cards
 task.spawn(function()
     local fp = myPlot:WaitForChild("FarmPlot", 15)
     if fp then
@@ -1163,7 +1137,7 @@ end
 --  TAB SEEDS TO COMPOST
 -- ════════════════════════════════════════════════════════
 
-local TabCompostSeeds = Win:CreateTab("Seeds to Compost", "recycle")
+local TabCompostSeeds = Win:AddTab("Seeds to Compost")
 
 local selectedCompostSeeds = {}
 
@@ -1189,26 +1163,25 @@ for _, r in ipairs(rarityOrder) do
     end
 end
 
-local compostSeedGrid = TabCompostSeeds:CreateFilteredCardGrid({
-    Flag     = "SelectedCompostSeeds",
+local compostSeedGrid = TabCompostSeeds:AddFilteredCardGrid({
     Groups   = compostSeedGroups,
     Columns  = 4,
     Callback = function(sel) selectedCompostSeeds = sel end,
 })
 
-TabCompostSeeds:CreateButton({
-    Name     = "Select all (current rarity)",
+TabCompostSeeds:AddButton({
+    Label    = "Select all (current rarity)",
     Callback = function()
         compostSeedGrid:SelectAll()
-        UI:Notify({ Title = "Selection", Content = "All seeds in group selected.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "All seeds in group selected.", Type = "info", Duration = 2 })
     end,
 })
 
-TabCompostSeeds:CreateButton({
-    Name     = "Deselect all",
+TabCompostSeeds:AddButton({
+    Label    = "Deselect all",
     Callback = function()
         compostSeedGrid:DeselectAll()
-        UI:Notify({ Title = "Selection", Content = "Selection cleared.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
     end,
 })
 
@@ -1235,27 +1208,24 @@ end
 --  TAB COMPOSTER
 -- ════════════════════════════════════════════════════════
 
-local TabComposter = Win:CreateTab("Composter", "flask-conical")
+local TabComposter = Win:AddTab("Composter")
 
 local composterFloor = 3
 local composting     = false
 local stopComposting = false
 
-TabComposter:CreateSection("Floor selection")
+TabComposter:AddLabel("Floor selection")
 
-TabComposter:CreateDropdown({
-    Name          = "Composter floor",
-    Options       = { "Floor 3", "Floor 2" },
-    CurrentOption = { "Floor 3" },
-    Flag          = "ComposterFloor",
-    Callback      = function(selected)
-        local v = selected[1] or selected
+TabComposter:AddDropdown({
+    Label    = "Composter floor",
+    Options  = { "Floor 3", "Floor 2" },
+    Callback = function(v)
         composterFloor = (v == "Floor 2") and 2 or 3
-        UI:Notify({ Title = "Composter", Content = "Now targeting " .. v, Duration = 2 })
+        VoidUI:Notify({ Title = "Composter", Message = "Now targeting " .. v, Type = "info", Duration = 2 })
     end,
 })
 
-TabComposter:CreateLabel("Uses seeds selected in 'Seeds to Compost' tab")
+TabComposter:AddLabel("Uses seeds selected in 'Seeds to Compost' tab")
 
 local function runCompostLoop()
     while not stopComposting do
@@ -1271,7 +1241,7 @@ local function runCompostLoop()
                 Composter.InsertSeed:InvokeServer(composterFloor, seedKey, 1)
             end)
             if not ok then
-                UI:Notify({ Title = "Error", Content = "InsertSeed failed: " .. tostring(err), Duration = 3 })
+                VoidUI:Notify({ Title = "Error", Message = "InsertSeed failed: " .. tostring(err), Type = "error", Duration = 3 })
                 task.wait(0.5)
                 continue
             end
@@ -1284,10 +1254,10 @@ local function runCompostLoop()
             local shouldPull = false
             if state.TooRich then
                 shouldPull = true
-                UI:Notify({ Title = "Composter F" .. composterFloor, Content = "TooRich! Pulling lever... (" .. formatValue(state.Value) .. ")", Duration = 3 })
+                VoidUI:Notify({ Title = "Composter F" .. composterFloor, Message = "TooRich! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
             elseif composterFloor == 3 and state.Value >= 25e12 then
                 shouldPull = true
-                UI:Notify({ Title = "Composter F3", Content = "25T reached! Pulling lever... (" .. formatValue(state.Value) .. ")", Duration = 3 })
+                VoidUI:Notify({ Title = "Composter F3", Message = "25T reached! Pulling lever... (" .. formatValue(state.Value) .. ")", Type = "success", Duration = 3 })
             end
             if shouldPull then
                 pcall(function() Composter.PullLever:InvokeServer(composterFloor) end)
@@ -1300,32 +1270,32 @@ local function runCompostLoop()
     composting = false
 end
 
-TabComposter:CreateSection("Auto-Compost")
+TabComposter:AddLabel("Auto-Compost")
 
-TabComposter:CreateToggle({
-    Name         = "Enable Auto-Compost",
-    CurrentValue = false,
-    Flag         = "AutoCompost",
-    Callback     = function(state)
+TabComposter:AddToggle({
+    Label    = "Enable Auto-Compost",
+    Default  = false,
+    Callback = function(state)
         if state then
             if composting then return end
             composting = true; stopComposting = false
             task.spawn(runCompostLoop)
-            UI:Notify({ Title = "Composter", Content = "Auto-compost started on Floor " .. composterFloor, Duration = 3 })
+            VoidUI:Notify({ Title = "Composter", Message = "Auto-compost started on Floor " .. composterFloor, Type = "success", Duration = 3 })
         else
             stopComposting = true
-            UI:Notify({ Title = "Composter", Content = "Auto-compost stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Composter", Message = "Auto-compost stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabComposter:CreateButton({
-    Name     = "Insert once (all selected seeds)",
+TabComposter:AddButton({
+    Label    = "Insert once (all selected seeds)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         task.spawn(function()
             local seedTools = getSelectedSeedTools()
             if #seedTools == 0 then
-                UI:Notify({ Title = "Composter", Content = "No seeds selected/found in backpack.", Duration = 3 })
+                VoidUI:Notify({ Title = "Composter", Message = "No seeds selected/found in backpack.", Type = "warning", Duration = 3 })
                 return
             end
             local inserted = 0
@@ -1337,15 +1307,15 @@ TabComposter:CreateButton({
                 inserted += 1
                 task.wait(0.15)
             end
-            UI:Notify({ Title = "Composter", Content = inserted .. " seed(s) inserted into Floor " .. composterFloor, Duration = 3 })
+            VoidUI:Notify({ Title = "Composter", Message = inserted .. " seed(s) inserted into Floor " .. composterFloor, Type = "success", Duration = 3 })
         end)
     end,
 })
 
-TabComposter:CreateSection("Check state")
+TabComposter:AddLabel("Check state")
 
-TabComposter:CreateButton({
-    Name     = "Request State (current floor)",
+TabComposter:AddButton({
+    Label    = "Request State (current floor)",
     Callback = function()
         task.spawn(function()
             local state = nil
@@ -1353,13 +1323,14 @@ TabComposter:CreateButton({
                 state = Composter.RequestState:InvokeServer(composterFloor)
             end)
             if state then
-                UI:Notify({
-                    Title    = "Floor " .. composterFloor .. " State",
-                    Content  = "Value: " .. formatValue(state.Value or 0) .. " | TooRich: " .. tostring(state.TooRich or false),
+                VoidUI:Notify({
+                    Title   = "Floor " .. composterFloor .. " State",
+                    Message = "Value: " .. formatValue(state.Value or 0) .. " | TooRich: " .. tostring(state.TooRich or false),
+                    Type    = "info",
                     Duration = 5,
                 })
             else
-                UI:Notify({ Title = "Error", Content = "Could not get state.", Duration = 3 })
+                VoidUI:Notify({ Title = "Error", Message = "Could not get state.", Type = "error", Duration = 3 })
             end
         end)
     end,
@@ -1369,35 +1340,39 @@ TabComposter:CreateButton({
 --  TAB SELL PETS
 -- ════════════════════════════════════════════════════════
 
-local TabSellPets = Win:CreateTab("Sell Pets", "dollar-sign")
+local TabSellPets = Win:AddTab("Sell Pets")
 
 local selectedPets = {}
+
 local petScrollFrame = Players.LocalPlayer.PlayerGui.MainUI.Menus.IndexFrame.Main.PetsFrame.PetsFrame
+
 local petItems = {}
 
 for _, child in ipairs(petScrollFrame:GetChildren()) do
     if child:IsA("Frame") then
         local icon   = child:FindFirstChild("Icon")
         local sname  = child:FindFirstChild("SeedName")
+        local rarity = child:FindFirstChild("RarityName")
         local name   = (sname and sname.Text ~= "???" and sname.Text) or child.Name
-        table.insert(petItems, { Name = name, Icon = icon and icon.Image or "" })
+        local rar    = rarity and rarity.Text or ""
+        local displayName = (rar ~= "") and (name .. " (" .. rar .. ")") or name
+        table.insert(petItems, { Name = name, Icon = icon and icon.Image or "", Display = displayName })
     end
 end
 
-TabSellPets:CreateLabel("Select pets to sell")
+TabSellPets:AddLabel("Select pets to sell")
 
-TabSellPets:CreateCardGrid({
-    Flag     = "SelectedPetsToSell",
+TabSellPets:AddCardGrid({
     Items    = petItems,
     Columns  = 4,
     Callback = function(sel) selectedPets = sel end,
 })
 
-TabSellPets:CreateButton({
-    Name     = "Deselect all",
+TabSellPets:AddButton({
+    Label    = "Deselect all",
     Callback = function()
         selectedPets = {}
-        UI:Notify({ Title = "Selection", Content = "Selection cleared.", Duration = 2 })
+        VoidUI:Notify({ Title = "Selection", Message = "Selection cleared.", Type = "warning", Duration = 2 })
     end,
 })
 
@@ -1418,13 +1393,12 @@ local function getSelectedPetTools()
     return out
 end
 
-TabSellPets:CreateSection("Auto-Sell")
+TabSellPets:AddLabel("Auto-Sell")
 
-TabSellPets:CreateToggle({
-    Name         = "Enable Auto-Sell Pets",
-    CurrentValue = false,
-    Flag         = "AutoSellPets",
-    Callback     = function(state)
+TabSellPets:AddToggle({
+    Label    = "Enable Auto-Sell Pets",
+    Default  = false,
+    Callback = function(state)
         if state then
             if sellingPets then return end
             sellingPets = true; stopSellingPets = false
@@ -1437,9 +1411,9 @@ TabSellPets:CreateToggle({
                             ReplicatedStorage.Remotes.SellPet:InvokeServer(entry.petKey)
                         end)
                         if ok then
-                            UI:Notify({ Title = "Pet sold!", Content = entry.trueName, Duration = 2 })
+                            VoidUI:Notify({ Title = "Pet sold!", Message = entry.trueName, Type = "success", Duration = 2 })
                         else
-                            UI:Notify({ Title = "Error", Content = "SellPet failed: " .. tostring(err), Duration = 3 })
+                            VoidUI:Notify({ Title = "Error", Message = "SellPet failed: " .. tostring(err), Type = "error", Duration = 3 })
                         end
                         task.wait(0.3)
                     end
@@ -1447,21 +1421,22 @@ TabSellPets:CreateToggle({
                 end
                 sellingPets = false
             end)
-            UI:Notify({ Title = "Sell Pets", Content = "Auto-sell started.", Duration = 3 })
+            VoidUI:Notify({ Title = "Sell Pets", Message = "Auto-sell started.", Type = "success", Duration = 3 })
         else
             stopSellingPets = true
-            UI:Notify({ Title = "Sell Pets", Content = "Auto-sell stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Sell Pets", Message = "Auto-sell stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabSellPets:CreateButton({
-    Name     = "Sell now (one shot)",
+TabSellPets:AddButton({
+    Label    = "Sell now (one shot)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         task.spawn(function()
             local pets = getSelectedPetTools()
             if #pets == 0 then
-                UI:Notify({ Title = "Sell Pets", Content = "No matching pets in backpack.", Duration = 3 })
+                VoidUI:Notify({ Title = "Sell Pets", Message = "No matching pets in backpack.", Type = "warning", Duration = 3 })
                 return
             end
             local sold = 0
@@ -1472,7 +1447,7 @@ TabSellPets:CreateButton({
                 if ok then sold += 1 end
                 task.wait(0.3)
             end
-            UI:Notify({ Title = "Sell Pets", Content = sold .. " pet(s) sold.", Duration = 3 })
+            VoidUI:Notify({ Title = "Sell Pets", Message = sold .. " pet(s) sold.", Type = "success", Duration = 3 })
         end)
     end,
 })
@@ -1481,18 +1456,17 @@ TabSellPets:CreateButton({
 --  TAB PETS (OPTIMIZE)
 -- ════════════════════════════════════════════════════════
 
-local TabPets = Win:CreateTab("Pets", "paw-print")
+local TabPets = Win:AddTab("Pets")
 
 local optimizing     = false
 local stopOptimizing = false
 
-TabPets:CreateSection("Auto-Optimize Pets")
+TabPets:AddLabel("Auto-Optimize Pets")
 
-TabPets:CreateToggle({
-    Name         = "Enable Auto-Optimize",
-    CurrentValue = false,
-    Flag         = "AutoOptimizePets",
-    Callback     = function(state)
+TabPets:AddToggle({
+    Label    = "Enable Auto-Optimize",
+    Default  = false,
+    Callback = function(state)
         if state then
             if optimizing then return end
             optimizing = true; stopOptimizing = false
@@ -1507,16 +1481,17 @@ TabPets:CreateToggle({
                 end
                 optimizing = false
             end)
-            UI:Notify({ Title = "Pets", Content = "Auto-optimize started.", Duration = 3 })
+            VoidUI:Notify({ Title = "Pets", Message = "Auto-optimize started.", Type = "success", Duration = 3 })
         else
             stopOptimizing = true
-            UI:Notify({ Title = "Pets", Content = "Auto-optimize stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "Pets", Message = "Auto-optimize stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabPets:CreateButton({
-    Name     = "Optimize now",
+TabPets:AddButton({
+    Label    = "Optimize now",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         task.spawn(optimizePets)
     end,
@@ -1525,10 +1500,10 @@ TabPets:CreateButton({
 -- ════════════════════════════════════════════════════════
 --  TAB PLANT RUSH
 -- ════════════════════════════════════════════════════════
-local TabPlantRush = Win:CreateTab("PlantRush", "zap")
+local TabPlantRush = Win:AddTab("PlantRush")
 
-local Camera     = workspace.CurrentCamera
-local RunService = game:GetService("RunService")
+local Camera         = workspace.CurrentCamera
+local RunService     = game:GetService("RunService")
 
 local plantRushActive   = false
 local stopPlantRush     = false
@@ -1537,19 +1512,37 @@ local stopCollect       = false
 local aimlockConnection = nil
 local currentTarget     = nil
 
+-- Scan des models dans PlantRush.Runtime
 local function scanPlantRushTargets()
     local runtime = workspace:FindFirstChild("InteractiveEvents")
         and workspace.InteractiveEvents:FindFirstChild("PlantRush")
         and workspace.InteractiveEvents.PlantRush:FindFirstChild("Runtime")
     if not runtime then return nil end
     for _, child in ipairs(runtime:GetChildren()) do
-        if child:IsA("Model") and child.Parent then
-            return child
+        if child:IsA("Model") then
+            -- Retourne le premier model valide (encore présent)
+            local pivot = pcall(function() return child:GetPivot() end)
+            if child.Parent then
+                return child
+            end
         end
     end
     return nil
 end
 
+local function getRuntimeCount()
+    local runtime = workspace:FindFirstChild("InteractiveEvents")
+        and workspace.InteractiveEvents:FindFirstChild("PlantRush")
+        and workspace.InteractiveEvents.PlantRush:FindFirstChild("Runtime")
+    if not runtime then return 0 end
+    local count = 0
+    for _, child in ipairs(runtime:GetChildren()) do
+        if child:IsA("Model") then count += 1 end
+    end
+    return count
+end
+
+-- Équipe le Tomato Shooter
 local function equipShooter()
     local tool = player.Backpack:FindFirstChild("Tomato Shooter")
         or (character and character:FindFirstChild("Tomato Shooter"))
@@ -1557,15 +1550,17 @@ local function equipShooter()
         humanoid:EquipTool(tool)
         return true
     elseif tool then
-        return true
+        return true -- déjà équipé
     end
     return false
 end
 
+-- Déséquipe tout
 local function unequipShooter()
     humanoid:UnequipTools()
 end
 
+-- Stop l'aimlock
 local function stopAimlock()
     if aimlockConnection then
         aimlockConnection:Disconnect()
@@ -1574,17 +1569,23 @@ local function stopAimlock()
     currentTarget = nil
 end
 
+-- Lance l'aimlock vers un model
 local function startAimlock(model)
     stopAimlock()
     currentTarget = model
+
     aimlockConnection = RunService.RenderStepped:Connect(function()
+        -- Si la cible a disparu → rescan
         if not currentTarget or not currentTarget.Parent then
             currentTarget = scanPlantRushTargets()
             if not currentTarget then
+                -- Plus de cibles → stop
                 stopAimlock()
                 return
             end
         end
+
+        -- Oriente la caméra vers le centre du model
         local ok, pivot = pcall(function() return currentTarget:GetPivot() end)
         if ok and pivot then
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, pivot.Position)
@@ -1592,19 +1593,19 @@ local function startAimlock(model)
     end)
 end
 
-TabPlantRush:CreateSection("Auto-Shoot (Tomato Shooter)")
+TabPlantRush:AddLabel("Auto-Shoot (Tomato Shooter)")
 
-TabPlantRush:CreateToggle({
-    Name         = "Enable Auto-Shoot",
-    CurrentValue = false,
-    Flag         = "AutoShoot",
-    Callback     = function(state)
+TabPlantRush:AddToggle({
+    Label    = "Enable Auto-Shoot",
+    Default  = false,
+    Callback = function(state)
         if state then
             if plantRushActive then return end
 
+            -- Vérifie que le tool est dispo
             if not player.Backpack:FindFirstChild("Tomato Shooter")
                 and not (character and character:FindFirstChild("Tomato Shooter")) then
-                UI:Notify({ Title = "PlantRush", Content = "Tomato Shooter not found in backpack!", Duration = 4 })
+                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found in backpack!", Type = "error", Duration = 4 })
                 return
             end
 
@@ -1622,29 +1623,36 @@ TabPlantRush:CreateToggle({
                             if stopPlantRush then return end
                             if not child:IsA("Model") then return end
                             task.wait(0.1)
+
+                            -- Check shooter seulement maintenant qu'un monstre est détecté
                             if not player.Backpack:FindFirstChild("Tomato Shooter")
                                 and not (character and character:FindFirstChild("Tomato Shooter")) then
-                                UI:Notify({ Title = "PlantRush", Content = "Tomato Shooter not found!", Duration = 4 })
+                                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found!", Type = "error", Duration = 4 })
                                 return
                             end
+
                             if not equipShooter() then return end
                             if not aimlockConnection then
                                 startAimlock(child)
                             end
                         end)
 
+                        -- Monstres déjà présents au moment de l'activation
                         local existing = scanPlantRushTargets()
                         if existing then
                             if not player.Backpack:FindFirstChild("Tomato Shooter")
                                 and not (character and character:FindFirstChild("Tomato Shooter")) then
-                                UI:Notify({ Title = "PlantRush", Content = "Tomato Shooter not found!", Duration = 4 })
+                                VoidUI:Notify({ Title = "PlantRush", Message = "Tomato Shooter not found!", Type = "error", Duration = 4 })
                             else
                                 equipShooter()
                                 startAimlock(existing)
                             end
                         end
 
-                        while not stopPlantRush do task.wait(0.5) end
+                        while not stopPlantRush do
+                            task.wait(0.5)
+                        end
+
                         spawnConn:Disconnect()
                     else
                         task.wait(1)
@@ -1656,23 +1664,22 @@ TabPlantRush:CreateToggle({
                 plantRushActive = false
             end)
 
-            UI:Notify({ Title = "PlantRush", Content = "Auto-shoot started.", Duration = 3 })
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-shoot started.", Type = "success", Duration = 3 })
         else
             stopPlantRush = true
             stopAimlock()
             unequipShooter()
-            UI:Notify({ Title = "PlantRush", Content = "Auto-shoot stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-shoot stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabPlantRush:CreateSection("Auto-Collect Drops")
+TabPlantRush:AddLabel("Auto-Collect Drops")
 
-TabPlantRush:CreateToggle({
-    Name         = "Enable Auto-Collect",
-    CurrentValue = false,
-    Flag         = "AutoCollectDrops",
-    Callback     = function(state)
+TabPlantRush:AddToggle({
+    Label    = "Enable Auto-Collect",
+    Default  = false,
+    Callback = function(state)
         if state then
             if collectActive then return end
             collectActive = true
@@ -1686,7 +1693,11 @@ TabPlantRush:CreateToggle({
                             if stopCollect then break end
                             if obj.Name:sub(1, 19) == "PlantRushLocalDrop_" and obj:IsA("BasePart") then
                                 local suffix = obj.Name:sub(20)
+
+                                -- Marche vers le drop
                                 humanoid:MoveTo(obj.Position)
+
+                                -- Attend d'être à moins de 14 studs ou timeout 10s
                                 local timeout = 0
                                 while obj.Parent
                                     and (hrp.Position - obj.Position).Magnitude > 12
@@ -1696,6 +1707,8 @@ TabPlantRush:CreateToggle({
                                     task.wait(0.1)
                                     timeout += 0.1
                                 end
+
+                                -- Fire seulement si on est assez proche et le drop existe encore
                                 if obj.Parent
                                     and not stopCollect
                                     and (hrp.Position - obj.Position).Magnitude <= 14
@@ -1704,10 +1717,13 @@ TabPlantRush:CreateToggle({
                                         ReplicatedStorage.Remotes.PlantRush.DropClaim:FireServer(suffix)
                                     end)
                                 end
+
                                 task.wait(0.2)
                             end
                         end
                     end
+
+                    -- Attend 5s avant le prochain scan
                     local elapsed = 0
                     while elapsed < 5 and not stopCollect do
                         task.wait(0.5)
@@ -1717,21 +1733,22 @@ TabPlantRush:CreateToggle({
                 collectActive = false
             end)
 
-            UI:Notify({ Title = "PlantRush", Content = "Auto-collect started.", Duration = 3 })
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-collect started.", Type = "success", Duration = 3 })
         else
             stopCollect = true
-            UI:Notify({ Title = "PlantRush", Content = "Auto-collect stopped.", Duration = 3 })
+            VoidUI:Notify({ Title = "PlantRush", Message = "Auto-collect stopped.", Type = "warning", Duration = 3 })
         end
     end,
 })
 
-TabPlantRush:CreateButton({
-    Name     = "Collect now (one shot)",
+TabPlantRush:AddButton({
+    Label    = "Collect now (one shot)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
     Callback = function()
         task.spawn(function()
             local hrp = character and character:FindFirstChild("HumanoidRootPart")
             if not hrp then
-                UI:Notify({ Title = "PlantRush", Content = "Character not ready.", Duration = 3 })
+                VoidUI:Notify({ Title = "PlantRush", Message = "Character not ready.", Type = "error", Duration = 3 })
                 return
             end
             local count = 0
@@ -1753,178 +1770,7 @@ TabPlantRush:CreateButton({
                     task.wait(0.2)
                 end
             end
-            UI:Notify({ Title = "PlantRush", Content = count .. " drop(s) claimed.", Duration = 3 })
-        end)
-    end,
-})
-
--- ════════════════════════════════════════════════════════
---  TAB CARNIVAL MUTATION
--- ════════════════════════════════════════════════════════
-local TabCarnival = Win:CreateTab("Carnival Mutation", "zap")
-
-local carnivalActive  = false
-local stopCarnival    = false
-local carnivalSpeed   = 32  -- walkspeed par défaut
-local defaultSpeed    = humanoid.WalkSpeed
-
-local WhackSwing = ReplicatedStorage.Remotes.WhackACrop.Swing
-
-local function getCarnivalTargets()
-    local folder = workspace:FindFirstChild("InteractiveEvents")
-        and workspace.InteractiveEvents:FindFirstChild("WhackACropRuntime")
-    if not folder then return {} end
-    local out = {}
-    for _, child in ipairs(folder:GetChildren()) do
-        if child:IsA("Model") then
-            table.insert(out, child)
-        end
-    end
-    return out
-end
-
-
-TabCarnival:CreateSection("Settings")
-
-TabCarnival:CreateSlider({
-    Name         = "Walk speed",
-    Range        = {16, 100},
-    Increment    = 2,
-    CurrentValue = carnivalSpeed,
-    Flag         = "CarnivalSpeed",
-    Callback     = function(v)
-        carnivalSpeed = v
-        if carnivalActive then
-            humanoid.WalkSpeed = carnivalSpeed
-        end
-    end,
-})
-
-TabCarnival:CreateSection("Auto-Whack")
-
-TabCarnival:CreateToggle({
-    Name         = "Enable Auto-Whack",
-    CurrentValue = false,
-    Flag         = "AutoWhack",
-    Callback     = function(state)
-        if state then
-            if carnivalActive then return end
-            carnivalActive = true
-            stopCarnival   = false
-            humanoid.WalkSpeed = carnivalSpeed
-
-            task.spawn(function()
-    while not stopCarnival do
-        local char = player.Character
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        local hum  = char and char:FindFirstChild("Humanoid")
-
-        if not hrp or not hum then
-            task.wait(0.5)
-            continue
-        end
-
-        -- trouve le model le plus proche en temps réel
-        local targets = getCarnivalTargets()
-        if #targets == 0 then
-            task.wait(0.3)
-            continue
-        end
-
-        local closest, closestDist = nil, math.huge
-        for _, t in ipairs(targets) do
-            if t and t.Parent then
-                local ok, pos = pcall(function() return t:GetPivot().Position end)
-                if ok then
-                    local d = (hrp.Position - pos).Magnitude
-                    if d < closestDist then
-                        closestDist = d
-                        closest = t
-                    end
-                end
-            end
-        end
-
-        if not closest then task.wait(0.3) continue end
-
-        local pos = closest:GetPivot().Position
-        hum:MoveTo(pos)
-
-        if closestDist <= 10 then
-            -- équipe le tool si pas déjà équipé
-            local tool = char:FindFirstChild("ToyHammer")
-                or player.Backpack:FindFirstChild("ToyHammer")
-            if tool and tool.Parent == player.Backpack then
-                hum:EquipTool(tool)
-                task.wait(0.1)
-            end
-
-
-            pcall(function() WhackSwing:FireServer() end)
-            task.wait(0.15)  -- cooldown entre fires
-        else
-            task.wait(0.1)
-        end
-    end
-
-    humanoid.WalkSpeed = defaultSpeed
-    carnivalActive = false
-end)
-
-
-            UI:Notify({ Title = "Carnival Mutation", Content = "Auto-whack démarré.", Duration = 3 })
-        else
-            stopCarnival = true
-            humanoid.WalkSpeed = defaultSpeed
-            UI:Notify({ Title = "Carnival Mutation", Content = "Auto-whack arrêté.", Duration = 3 })
-        end
-    end,
-})
-
-TabCarnival:CreateButton({
-    Name     = "Whack now (one shot)",
-    Callback = function()
-        task.spawn(function()
-            local hrp = character and character:FindFirstChild("HumanoidRootPart")
-            if not hrp then
-                UI:Notify({ Title = "Carnival", Content = "Character pas prêt.", Duration = 3 })
-                return
-            end
-
-            local targets = getCarnivalTargets()
-            if #targets == 0 then
-                UI:Notify({ Title = "Carnival", Content = "Aucune cible trouvée.", Duration = 3 })
-                return
-            end
-
-            local prevSpeed = humanoid.WalkSpeed
-            humanoid.WalkSpeed = carnivalSpeed
-            local count = 0
-
-            table.sort(targets, function(a, b)
-                local pa = a:GetPivot().Position
-                local pb = b:GetPivot().Position
-                return (hrp.Position - pa).Magnitude < (hrp.Position - pb).Magnitude
-            end)
-
-            for _, target in ipairs(targets) do
-                if not target or not target.Parent then continue end
-                local pos = target:GetPivot().Position
-                humanoid:MoveTo(pos)
-                local timeout = 0
-                while target.Parent and (hrp.Position - pos).Magnitude > 8 and timeout < 5 do
-                    task.wait(0.1)
-                    timeout += 0.1
-                end
-                if target.Parent and (hrp.Position - pos).Magnitude <= 10 then
-                    pcall(function() WhackSwing:FireServer() end)
-                    count += 1
-                end
-                task.wait(0.2)
-            end
-
-            humanoid.WalkSpeed = prevSpeed
-            UI:Notify({ Title = "Carnival", Content = count .. " cible(s) whackées.", Duration = 3 })
+            VoidUI:Notify({ Title = "PlantRush", Message = count .. " drop(s) claimed.", Type = "success", Duration = 3 })
         end)
     end,
 })
@@ -1932,15 +1778,15 @@ TabCarnival:CreateButton({
 -- ════════════════════════════════════════════════════════
 --  TAB INFO
 -- ════════════════════════════════════════════════════════
-local TabInfo = Win:CreateTab("Info", "info")
-
-TabInfo:CreateLabel("Detected plot")
-TabInfo:CreateButton({ Name = myPlot.Name, Callback = function() end })
-TabInfo:CreateLabel("Stands on startup")
+local TabInfo = Win:AddTab("Info")
+TabInfo:AddLabel("Detected plot")
+TabInfo:AddButton({ Label = myPlot.Name, Callback = function() end })
+TabInfo:AddLabel("Stands on startup")
 for name, idx in pairs(getWorldSeeds()) do
-    TabInfo:CreateLabel(name .. "  →  Stand " .. idx)
+    TabInfo:AddLabel(name .. "  →  Stand " .. idx)
 end
-TabInfo:CreateLabel("Eggs on startup")
+TabInfo:AddLabel("Eggs on startup")
 for _, egg in ipairs(initialEggs) do
-    TabInfo:CreateLabel("Podium " .. egg.podiumIdx .. "  →  " .. egg.name)
+    TabInfo:AddLabel("Podium " .. egg.podiumIdx .. "  →  " .. egg.name)
 end
+end)

@@ -1776,6 +1776,196 @@ TabPlantRush:AddButton({
 })
 
 -- ════════════════════════════════════════════════════════
+--  TAB CARNIVAL MUTATION
+--  À coller juste avant le bloc "TAB INFO"
+-- ════════════════════════════════════════════════════════
+ 
+local TabCarnival = Win:AddTab("Carnival")
+ 
+local carnivalActive = false
+local stopCarnival   = false
+local carnivalSpeed  = 32
+ 
+local WhackSwing = ReplicatedStorage:WaitForChild("Remotes", 5)
+    and ReplicatedStorage.Remotes:FindFirstChild("WhackACrop")
+    and ReplicatedStorage.Remotes.WhackACrop:FindFirstChild("Swing")
+ 
+local function getCarnivalTargets()
+    local folder = workspace:FindFirstChild("InteractiveEvents")
+        and workspace.InteractiveEvents:FindFirstChild("WhackACropRuntime")
+    if not folder then return {} end
+    local out = {}
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") then
+            table.insert(out, child)
+        end
+    end
+    return out
+end
+ 
+TabCarnival:AddLabel("Settings")
+ 
+TabCarnival:AddSlider({
+    Label    = "Walk speed",
+    Min      = 16,
+    Max      = 100,
+    Default  = carnivalSpeed,
+    Callback = function(v)
+        carnivalSpeed = v
+        if carnivalActive then
+            local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+            if hum then hum.WalkSpeed = carnivalSpeed end
+        end
+    end,
+})
+ 
+TabCarnival:AddLabel("Auto-Whack")
+ 
+TabCarnival:AddToggle({
+    Label    = "Enable Auto-Whack",
+    Default  = false,
+    Callback = function(state)
+        if state then
+            if carnivalActive then return end
+            if not WhackSwing then
+                VoidUI:Notify({ Title = "Carnival", Message = "Remote WhackACrop.Swing introuvable.", Type = "error", Duration = 4 })
+                return
+            end
+            carnivalActive = true
+            stopCarnival   = false
+ 
+            local hum0 = player.Character and player.Character:FindFirstChild("Humanoid")
+            if hum0 then hum0.WalkSpeed = carnivalSpeed end
+ 
+            task.spawn(function()
+                while not stopCarnival do
+                    local char = player.Character
+                    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum  = char and char:FindFirstChild("Humanoid")
+ 
+                    if not hrp or not hum then
+                        task.wait(0.5)
+                        continue
+                    end
+ 
+                    local targets = getCarnivalTargets()
+                    if #targets == 0 then
+                        task.wait(0.3)
+                        continue
+                    end
+ 
+                    -- Trouve la cible la plus proche
+                    local closest, closestDist = nil, math.huge
+                    for _, t in ipairs(targets) do
+                        if t and t.Parent then
+                            local ok, pos = pcall(function() return t:GetPivot().Position end)
+                            if ok then
+                                local d = (hrp.Position - pos).Magnitude
+                                if d < closestDist then
+                                    closestDist = d
+                                    closest     = t
+                                end
+                            end
+                        end
+                    end
+ 
+                    if not closest then task.wait(0.3) continue end
+ 
+                    local pos = closest:GetPivot().Position
+                    hum:MoveTo(pos)
+ 
+                    if closestDist <= 10 then
+                        -- Équipe ToyHammer si dans le backpack
+                        local tool = char:FindFirstChild("ToyHammer")
+                            or player.Backpack:FindFirstChild("ToyHammer")
+                        if tool and tool.Parent == player.Backpack then
+                            hum:EquipTool(tool)
+                            task.wait(0.1)
+                        end
+ 
+                        pcall(function() WhackSwing:FireServer() end)
+                        task.wait(0.15)
+                    else
+                        task.wait(0.1)
+                    end
+                end
+ 
+                -- Restaure le walkspeed par défaut
+                local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+                if hum then hum.WalkSpeed = 16 end
+                carnivalActive = false
+            end)
+ 
+            VoidUI:Notify({ Title = "Carnival Mutation", Message = "Auto-whack démarré.", Type = "success", Duration = 3 })
+        else
+            stopCarnival = true
+            local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+            VoidUI:Notify({ Title = "Carnival Mutation", Message = "Auto-whack arrêté.", Type = "warning", Duration = 3 })
+        end
+    end,
+})
+ 
+TabCarnival:AddButton({
+    Label    = "Whack now (one shot)",
+    Colors   = { Color3.fromRGB(130, 80, 255), Color3.fromRGB(220, 80, 160) },
+    Callback = function()
+        task.spawn(function()
+            if not WhackSwing then
+                VoidUI:Notify({ Title = "Carnival", Message = "Remote WhackACrop.Swing introuvable.", Type = "error", Duration = 4 })
+                return
+            end
+ 
+            local char = player.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChild("Humanoid")
+            if not hrp or not hum then
+                VoidUI:Notify({ Title = "Carnival", Message = "Character pas prêt.", Type = "error", Duration = 3 })
+                return
+            end
+ 
+            local targets = getCarnivalTargets()
+            if #targets == 0 then
+                VoidUI:Notify({ Title = "Carnival", Message = "Aucune cible trouvée.", Type = "warning", Duration = 3 })
+                return
+            end
+ 
+            local prevSpeed = hum.WalkSpeed
+            hum.WalkSpeed = carnivalSpeed
+ 
+            table.sort(targets, function(a, b)
+                local pa = a:GetPivot().Position
+                local pb = b:GetPivot().Position
+                return (hrp.Position - pa).Magnitude < (hrp.Position - pb).Magnitude
+            end)
+ 
+            local count = 0
+            for _, target in ipairs(targets) do
+                if not target or not target.Parent then continue end
+                local pos = target:GetPivot().Position
+                hum:MoveTo(pos)
+ 
+                local timeout = 0
+                while target.Parent and (hrp.Position - pos).Magnitude > 8 and timeout < 5 do
+                    task.wait(0.1)
+                    timeout += 0.1
+                end
+ 
+                if target.Parent and (hrp.Position - pos).Magnitude <= 10 then
+                    pcall(function() WhackSwing:FireServer() end)
+                    count += 1
+                end
+                task.wait(0.2)
+            end
+ 
+            hum.WalkSpeed = prevSpeed
+            VoidUI:Notify({ Title = "Carnival", Message = count .. " cible(s) whackée(s).", Type = "success", Duration = 3 })
+        end)
+    end,
+})
+ 
+
+-- ════════════════════════════════════════════════════════
 --  TAB INFO
 -- ════════════════════════════════════════════════════════
 local TabInfo = Win:AddTab("Info")

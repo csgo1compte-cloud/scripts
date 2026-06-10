@@ -3,7 +3,9 @@
 -- Enable Auto-Collect to sell your crates every 2 minutes.
 
 local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/csgo1compte-cloud/RayVoid/refs/heads/main/RayVoid"))()
-UI:SetScriptName("Build-A-Ring-Farm Premium")
+UI:SetScriptName("Build-A-Ring-Farm")
+UI:ShowCredit(function()
+
 
 
 
@@ -1944,3 +1946,5 @@ TabInfo:CreateLabel("Eggs on startup")
 for _, egg in ipairs(initialEggs) do
     TabInfo:CreateLabel("Podium " .. egg.podiumIdx .. "  →  " .. egg.name)
 end
+
+end)
